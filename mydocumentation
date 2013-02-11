@@ -1,0 +1,36 @@
+HBase uses scanners to read data.
+
+A client wants to read some data. It asks the master which regionserver handles that data.
+The master replies with the right regionserver and the region.
+The client makes a "Get" that syas, get me data in region XYZ.
+
+Upon a "get" HRegionServer handles the function. It calls get on the HRegion object for that data. (HRegion.get)
+HRegion reads itself by instantiaint a RegionScannerImpl, and calling RegionScannerImpl.next.
+
+A Region itself consists of a number of Stores. So, the RegionScannerImpl gets many StoreScanners, and adds it to a "storeHeap".
+Upon RegionScannerImpl.next, (which in turn calls nextRaw, which in turn calls nextInternal), each of these scanners is iterated over.
+
+This is done by an abstraction called a "heap", which combines a bunch of scanners together and supports a "peek" function. Peek is called, and if the value returned is not the one the filters want, heap.next is called, and so on.
+
+heap.peek in turn iterates over each scanner, by calling the heap's CURRENT scanners "peek" until it runs out, and then switching to the next scanner. (Don't know what order the scanners are called in, this seems to be done in pollRealKV() in KeyValueHeap)
+
+
+So eventually, the heap calles StoreScanner.peek. Now, the StoreScanner consists of many StoreFileScanners and MemStoreScanners, put in another heap of themselves.
+StoreScanner has a reference to its HStore, so it calls HStore.getScanners. This in turn calls StoreFileScanner.getScannersForStoreFiles
+(a static function which returns StoreFileScanners) as well as this.memstore.getScanners for MemStoreScanners and returns both Mem and File scanners. StoreScanner then
+ puts this result into a heap. So on a "peek" or a "next", we actually call peek and next of MemStoreScanners or StoreFileScanner.
+
+Since we don't care about things in the memstore, we turn to peek/next in the StoreFileScanner. More interestingly, "next" since peek just returns the last value that "next" saw.
+StoreFileScanner has a HFileScanner (hfs), on which is calls hfs.next
+HFs can be HFileScannerV1 or V2. We only use V2.
+Each of these scanners maintains a HFileReader, on which it calls readNextDataBlock.
+Finally, this HFileReader.readNextDataBlock is the one that reads a block, caches it, etc.
+
+VARIOUS CACHE TOOLS:
+1. Throttling caching: Prevent things from being cached itself. (Based on worklaod ID, or based on num of disk accesses)
+   This needs to be coupled with 2a to be effective
+2. Access time throttling: Prevent access time of a block from being updated unless:
+      a. It has a certain ID. Thus, uniform workload IDs will not bump up non-popular block's access times.
+      b. Been accessed X times. Thus blocks with less than X accesses will have a higher chance of being evicted. But this is achieved by below buckets.
+3. Bucket throttling: Don't move things to MULTI priority unless they have seens some min number of accesses already. 
+   Prevents things from moving to higher priority too optimistically.
