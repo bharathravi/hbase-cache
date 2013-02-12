@@ -20,15 +20,7 @@ package org.apache.hadoop.hbase.io.hfile;
 
 import java.io.IOException;
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.EnumMap;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.PriorityQueue;
-import java.util.SortedSet;
-import java.util.TreeSet;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -758,6 +750,7 @@ public class LruBlockCache implements BlockCache, HeapSize {
     // Log size
     long totalSize = heapSize();
     long freeSize = maxSize - totalSize;
+
     LruBlockCache.LOG.debug("Stats: " +
         "total=" + StringUtils.byteDesc(totalSize) + ", " +
         "free=" + StringUtils.byteDesc(freeSize) + ", " +
@@ -780,28 +773,47 @@ public class LruBlockCache implements BlockCache, HeapSize {
 //      LOG.info("FOr Hfile: " + each + " counts are : " + HFileReaderV2.readCounts.get(each));
 //    }
 //
-    for(int each : HFileReaderV2.idHitCounts.keySet()) {
-      AtomicLong hits = HFileReaderV2.idHitCounts.get(each);
-      AtomicLong misses = HFileReaderV2.idMissCounts.get(each);
 
-      float ratio = -1;
-      if (misses.longValue() > 0) {
-        ratio = hits.longValue()/(float)(misses.longValue() + hits.longValue());
+    Set<Integer> keys = new TreeSet<Integer>();
+    keys.addAll(HFileReaderV2.idHitCounts.keySet());
+    keys.addAll(HFileReaderV2.idMissCounts.keySet());
+    for(int each : keys) {
+      float hits = 0;
+      if (HFileReaderV2.idHitCounts.containsKey(each)) {
+        hits = HFileReaderV2.idHitCounts.get(each).floatValue();
       }
-      LOG.info("FOr ID: " + each + " hits: " + hits.longValue()
-      + " misses: " + misses.longValue() + " ratio: " + ratio);
+
+      float misses = 0;
+      if (HFileReaderV2.idMissCounts.containsKey(each)) {
+        misses = HFileReaderV2.idMissCounts.get(each).floatValue();
+      }
+
+      if (hits > 0 || misses > 0) {
+        float ratio = hits/(misses + hits);
+        LOG.info("FOr ID: " + each + " hits: " + hits
+          + " misses: " + misses + " ratio: " + ratio);
+      }
     }
 
-    for(int each : HFileReaderV2.idHitCountsCumulative.keySet()) {
-      AtomicLong hits = HFileReaderV2.idHitCountsCumulative.get(each);
-      AtomicLong misses = HFileReaderV2.idMissCountsCumulative.get(each);
-
-      float ratio = -1;
-      if (misses.longValue() > 0) {
-        ratio = hits.longValue()/(float)(misses.longValue() + hits.longValue());
+    keys = new TreeSet<Integer>();
+    keys.addAll(HFileReaderV2.idHitCountsCumulative.keySet());
+    keys.addAll(HFileReaderV2.idMissCountsCumulative.keySet());
+    for(int each : keys) {
+      float hits = 0;
+      if (HFileReaderV2.idHitCountsCumulative.containsKey(each)) {
+        hits = HFileReaderV2.idHitCountsCumulative.get(each).floatValue();
       }
-      LOG.info("FOr IDCumulative: " + each + " hits: " + hits.longValue()
-          + " misses: " + misses.longValue() + " ratio: " + ratio);
+
+      float misses = 0;
+      if (HFileReaderV2.idMissCountsCumulative.containsKey(each)) {
+        misses = HFileReaderV2.idMissCountsCumulative.get(each).floatValue();
+      }
+
+      if (hits > 0 || misses > 0) {
+        float ratio = hits/(misses + hits);
+        LOG.info("FOr IDCumulative: " + each + " hits: " + hits
+            + " misses: " + misses + " ratio: " + ratio);
+      }
     }
 //    LOG.info("BEGINDHUP");
 //    for(String each : HFileReaderV2.blockCounts.keySet()) {

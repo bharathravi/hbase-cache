@@ -358,37 +358,19 @@ public class HFileReaderV2 extends AbstractHFileReader {
                   + dataBlockEncoder.getEncodingInCache() + ")");
             }
 
+            if (idHitCounts.containsKey(customId)) {
+              idHitCounts.get(customId).incrementAndGet();
+            } else {
+              idHitCounts.put(customId, new AtomicLong((1)));
+            }
 
-//            if (idHitCounts.containsKey(customId)) {
-//              idHitCounts.get(customId).incrementAndGet();
-//            } else {
-//              idHitCounts.put(customId, new AtomicLong((1)));
-//            }
-
-            if (cachedBlock.getBlockType() == BlockType.DATA) {
-              if (idHitCountsCumulative.containsKey(customId)) {
-                idHitCountsCumulative.get(customId).incrementAndGet();
-              } else {
-                idHitCountsCumulative.put(customId, new AtomicLong((1)));
-              }
+            if (idHitCountsCumulative.containsKey(customId)) {
+              idHitCountsCumulative.get(customId).incrementAndGet();
+            } else {
+              idHitCountsCumulative.put(customId, new AtomicLong((1)));
             }
 
             return cachedBlock;
-          } else {
-            // Cache miss
-//            if (idMissCounts.containsKey(customId)) {
-//              idMissCounts.get(customId).incrementAndGet();
-//            } else {
-//              idMissCounts.put(customId, new AtomicLong((1)));
-//            }
-
-            if (cachedBlock.getBlockType() == BlockType.DATA) {
-              if (idMissCountsCumulative.containsKey(customId)) {
-                idMissCountsCumulative.get(customId).incrementAndGet();
-              } else {
-                idMissCountsCumulative.put(customId, new AtomicLong((1)));
-              }
-            }
           }
           // Carry on, please load.
         }
@@ -419,6 +401,22 @@ public class HFileReaderV2 extends AbstractHFileReader {
 //        } else {
 //          blockDiskCounts.put(cacheKey, new AtomicLong(1));
 //        }
+
+
+        // Cache miss
+        if (idMissCounts.containsKey(customId)) {
+          idMissCounts.get(customId).incrementAndGet();
+        } else {
+          idMissCounts.put(customId, new AtomicLong((1)));
+        }
+
+        if (idMissCountsCumulative.containsKey(customId)) {
+          idMissCountsCumulative.get(customId).incrementAndGet();
+        } else {
+          idMissCountsCumulative.put(customId, new AtomicLong((1)));
+        }
+
+
 
         if (customId == 70) { // TODO(CACHECHANGE): IDTHROTTLING)
           idThrottling = true;

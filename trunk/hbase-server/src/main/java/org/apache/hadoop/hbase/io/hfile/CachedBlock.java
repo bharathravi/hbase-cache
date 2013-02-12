@@ -95,6 +95,7 @@ public class CachedBlock implements HeapSize, Comparable<CachedBlock> {
     } else {
       this.priority = BlockPriority.SINGLE;
     }
+    customId = 0;
   }
 
   /**
@@ -108,7 +109,8 @@ public class CachedBlock implements HeapSize, Comparable<CachedBlock> {
       btlogged = true;
       LOG.info("CACHEEFFECTS: BT DISABLED");
     }
-    if(this.priority == BlockPriority.SINGLE) {// && numAccesses >= 3) { // TODO(CACHECHANGE): BUCKETTHROTTLING DISABLED
+
+    if (this.priority == BlockPriority.SINGLE && numAccesses >= 10) { // TODO(CACHECHANGE): BUCKETTHROTTLING DISABLED
       this.priority = BlockPriority.MULTI;
     }
   }

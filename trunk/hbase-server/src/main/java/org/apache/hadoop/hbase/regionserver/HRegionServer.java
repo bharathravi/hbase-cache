@@ -2711,6 +2711,7 @@ public class  HRegionServer implements ClientProtocol,
       ClientProtos.Get get = request.getGet();
       Boolean existence = null;
       Result r = null;
+
       // TODO(bharath): This is where a typical read on a region happens
       if (request.getClosestRowBefore()) {
         if (get.getColumnCount() != 1) {
