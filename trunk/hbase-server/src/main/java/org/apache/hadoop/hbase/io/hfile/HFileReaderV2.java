@@ -21,9 +21,7 @@ package org.apache.hadoop.hbase.io.hfile;
 import java.io.DataInput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.commons.collections.map.HashedMap;
@@ -232,13 +230,8 @@ public class HFileReaderV2 extends AbstractHFileReader {
       if (cacheConf.isBlockCacheEnabled()) {
         LruBlockCache cache = (LruBlockCache) cacheConf.getBlockCache();
 
-        boolean updateAccess = true;
-        if (customId == 70) {
-          updateAccess = false;
-        }
-
         HFileBlock cachedBlock =
-          (HFileBlock) cache.getBlock(cacheKey, cacheBlock, false, updateAccess, customId);
+          (HFileBlock) cache.getBlock(cacheKey, cacheBlock, false, true, customId, false);
         if (cachedBlock != null) {
           // Return a distinct 'shallow copy' of the block,
           // so pos does not get messed by the scanner
@@ -253,21 +246,15 @@ public class HFileReaderV2 extends AbstractHFileReader {
       final long delta = System.nanoTime() - startTimeNs;
       HFile.offerReadLatency(delta, true);
 
-      boolean popularityCache = false;
-
-      if (customId == 70) { // TODO(CACHECHANGE): IDTHROTTLING
-        popularityCache = false;
-      } else {
-        popularityCache = true;
-      }
 
       // METAPLACE
       // Cache the block
-      if (cacheBlock && popularityCache) {
+      if (cacheBlock) {
         LruBlockCache cache = (LruBlockCache) cacheConf.getBlockCache();
         cache.cacheBlock(cacheKey, metaBlock,
             cacheConf.isInMemory(), customId  );
       }
+      metaBlock.reads.incrementAndGet();
 
       return metaBlock.getBufferWithoutHeader();
     }
@@ -277,7 +264,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
    * Read in a file block.
    * @param dataBlockOffset offset to read.
    * @param onDiskBlockSize size of the block
-   * @param cacheBlock
+   * @param cacheBlock                                            ~
    * @param pread Use positional read instead of seek+read (positional is
    *          better doing random reads whereas seek+read is better scanning).
    * @param isCompaction is this block being read as part of a compaction
@@ -289,6 +276,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
    * @throws IOException
    */
   static boolean dtlogged = false;
+  public static Set<BlockCacheKey> uniqueBlocks = new HashSet<BlockCacheKey>();
   @Override
   public HFileBlock readBlock(long dataBlockOffset, long onDiskBlockSize,
       final boolean cacheBlock, boolean pread, final boolean isCompaction,
@@ -334,13 +322,9 @@ public class HFileReaderV2 extends AbstractHFileReader {
           //LOG.info("YESSSS RIGHT CACHE");
           //}
 
-          boolean updateAccess = true;
-          if (customId == 70) {
-            updateAccess = false;
-          }
 
           HFileBlock cachedBlock = (HFileBlock) cache.getBlock(cacheKey,
-                            cacheBlock, useLock, updateAccess, customId);
+              cacheBlock, useLock, true, customId, expectedBlockType == BlockType.DATA);
 
           if (cachedBlock != null) {
             if (cachedBlock.getBlockType() == BlockType.DATA) {
@@ -358,16 +342,18 @@ public class HFileReaderV2 extends AbstractHFileReader {
                   + dataBlockEncoder.getEncodingInCache() + ")");
             }
 
-            if (idHitCounts.containsKey(customId)) {
-              idHitCounts.get(customId).incrementAndGet();
-            } else {
-              idHitCounts.put(customId, new AtomicLong((1)));
-            }
+            if (cachedBlock.getBlockType() == BlockType.DATA) {
+              if (idHitCounts.containsKey(customId)) {
+                idHitCounts.get(customId).incrementAndGet();
+              } else {
+                idHitCounts.put(customId, new AtomicLong((1)));
+              }
 
-            if (idHitCountsCumulative.containsKey(customId)) {
-              idHitCountsCumulative.get(customId).incrementAndGet();
-            } else {
-              idHitCountsCumulative.put(customId, new AtomicLong((1)));
+              if (idHitCountsCumulative.containsKey(customId)) {
+                idHitCountsCumulative.get(customId).incrementAndGet();
+              } else {
+                idHitCountsCumulative.put(customId, new AtomicLong((1)));
+              }
             }
 
             return cachedBlock;
@@ -390,75 +376,34 @@ public class HFileReaderV2 extends AbstractHFileReader {
         final long delta = System.nanoTime() - startTimeNs;
         HFile.offerReadLatency(delta, pread);
 
-        // True if we are supposed to throttle: i.e, if true, do not cache.
-        boolean idThrottling = false;
-        boolean diskThrottling = false;
-
-        hfileBlock.reads.incrementAndGet();
-
-//        if (blockDiskCounts.containsKey(cacheKey)) {
-//          blockDiskCounts.get(blockDiskCounts).incrementAndGet();
-//        } else {
-//          blockDiskCounts.put(cacheKey, new AtomicLong(1));
-//        }
-
-
         // Cache miss
-        if (idMissCounts.containsKey(customId)) {
-          idMissCounts.get(customId).incrementAndGet();
-        } else {
-          idMissCounts.put(customId, new AtomicLong((1)));
+        if (hfileBlock.getBlockType() == BlockType.DATA) {
+          if (idMissCounts.containsKey(customId)) {
+            idMissCounts.get(customId).incrementAndGet();
+          } else {
+            idMissCounts.put(customId, new AtomicLong((1)));
+          }
+
+          if (idMissCountsCumulative.containsKey(customId)) {
+            idMissCountsCumulative.get(customId).incrementAndGet();
+          } else {
+            idMissCountsCumulative.put(customId, new AtomicLong((1)));
+          }
         }
 
-        if (idMissCountsCumulative.containsKey(customId)) {
-          idMissCountsCumulative.get(customId).incrementAndGet();
-        } else {
-          idMissCountsCumulative.put(customId, new AtomicLong((1)));
-        }
-
-
-
-        if (customId == 70) { // TODO(CACHECHANGE): IDTHROTTLING)
-          idThrottling = true;
-        } else {
-          idThrottling = false;
-        }
-
-        if (!dtlogged) {
-          dtlogged = true;
-          LOG.info("CACHEEFFECTS: DT DISABLED");
-        }
-
-//        if (hfileBlock.getBlockType() != BlockType.DATA) {
-//          diskThrottling = false;
-//        } else {
-//          if (!blockDiskCounts.containsKey(cacheKey)) {
-//            LOG.info("DTBOO");
-//            diskThrottling = true;
-//          } else if (blockDiskCounts.get(cacheKey).longValue() <= 0) {
-//            LOG.info("DTBOO");
-//            diskThrottling = true;
-//          } else {
-//            LOG.info("DTYAY");
-//            diskThrottling = false;
-//          }
-//        }
-
-        //TODO(CACHECHANGE): DISKTHROTTLING
-        diskThrottling = false;
 
         // MAINPLACE
         // Cache the block if necessary
-        if (cacheBlock && cacheConf.shouldCacheBlockOnRead(hfileBlock.getBlockType().getCategory())
-            && !idThrottling && !diskThrottling) {
+        if (cacheBlock && cacheConf.shouldCacheBlockOnRead(hfileBlock.getBlockType().getCategory())) {
           LruBlockCache cache = (LruBlockCache) cacheConf.getBlockCache();
           cache.cacheBlock(cacheKey, hfileBlock, cacheConf.isInMemory(), customId);
         }
 
-        if (hfileBlock.getBlockType() == BlockType.DATA) {
-          HFile.dataBlockReadCnt.incrementAndGet();
+        if (hfileBlock.getBlockType() == BlockType.DATA &&
+            !uniqueBlocks.contains(cacheKey)) {
+          uniqueBlocks.add(cacheKey);
         }
-
+        hfileBlock.reads.incrementAndGet();
         return hfileBlock;
       }
     } finally {

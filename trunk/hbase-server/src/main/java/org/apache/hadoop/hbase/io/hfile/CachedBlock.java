@@ -60,7 +60,7 @@ public class CachedBlock implements HeapSize, Comparable<CachedBlock> {
   private volatile long accessTime;
   private long size;
   private BlockPriority priority;
-  private volatile long numAccesses;
+  private volatile long numAccesses = 0;
 
   public int getCustomId() {
     return customId;
@@ -103,14 +103,10 @@ public class CachedBlock implements HeapSize, Comparable<CachedBlock> {
    */
   static boolean btlogged = false;
   private static final Log LOG = LogFactory.getLog(CachedBlock.class);
-  public void access(long accessTime) {
+  public void access(long accessTime, long threshold, int customid) {
     this.accessTime = accessTime;
-    if (!btlogged)  {
-      btlogged = true;
-      LOG.info("CACHEEFFECTS: BT DISABLED");
-    }
 
-    if (this.priority == BlockPriority.SINGLE && numAccesses >= 10) { // TODO(CACHECHANGE): BUCKETTHROTTLING DISABLED
+    if (this.priority == BlockPriority.SINGLE) { // && numAccesses > threshold) { // TODO(CACHECHANGE): BUCKETTHROTTLING ENABLED
       this.priority = BlockPriority.MULTI;
     }
   }

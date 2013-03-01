@@ -510,6 +510,8 @@ public class  HRegionServer implements ClientProtocol,
         conf.getBoolean("hbase.rpc.verbose", false),
         conf, HConstants.QOS_THRESHOLD);
     // Set our address.
+    LOG.info("FOr handler: " + conf.getInt("hbase.regionserver.handler.count", 10) +
+    "metahandler: " + conf.getInt("hbase.regionserver.metahandler.count", 10));
     this.isa = this.rpcServer.getListenerAddress();
 
     this.rpcServer.setErrorHandler(this);

@@ -91,7 +91,7 @@ public class ClientScanner extends AbstractClientScanner {
      * @param connection Connection identifying the cluster
      * @throws IOException
      */
-    public ClientScanner(final Configuration conf, final Scan scan,
+    public ClientScanner(final Configuration conf, final Scan   scan,
       final byte[] tableName, HConnection connection) throws IOException {
       if (LOG.isDebugEnabled()) {
         LOG.debug("Creating scanner over "

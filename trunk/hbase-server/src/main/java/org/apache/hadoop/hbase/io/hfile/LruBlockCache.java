@@ -111,6 +111,21 @@ public class LruBlockCache implements BlockCache, HeapSize {
   /** Statistics thread */
   static final int statThreadPeriod = 60 * 1;
 
+  /** Map of workload ID to its cache occupancy, revised every PERIOD seconds **/
+  private static HashMap<Integer, Float> occupancyMap = new HashMap<Integer, Float>();
+
+  /** Map of workload ID to its cache hit Rates, revised every PERIOD seconds **/
+  private static HashMap<Integer, Float> hitRatioMap = new HashMap<Integer, Float>();
+
+  /** Map of workload ID to its throttle threshold, revised every PERIOD seconds **/
+  private static HashMap<Integer, Float> thresholdMap = new HashMap<Integer, Float>();
+
+  private static HashMap<Integer, AtomicLong> hitsCount = new HashMap<Integer, AtomicLong>();
+  private static HashMap<Integer, AtomicLong> missCount = new HashMap<Integer, AtomicLong>();
+
+  private static Random rng = new Random();
+
+
   /** Concurrent map (the cache) */
   private final ConcurrentHashMap<BlockCacheKey,CachedBlock> map;
 
@@ -125,11 +140,11 @@ public class LruBlockCache implements BlockCache, HeapSize {
 
   /** Statistics thread schedule pool (for heavy debugging, could remove) */
   private final ScheduledExecutorService scheduleThreadPool =
-    Executors.newScheduledThreadPool(1,
-      new ThreadFactoryBuilder()
-        .setNameFormat("LRU Statistics #%d")
-        .setDaemon(true)
-        .build());
+      Executors.newScheduledThreadPool(1,
+          new ThreadFactoryBuilder()
+              .setNameFormat("LRU Statistics #%d")
+              .setDaemon(true)
+              .build());
 
   /** Current size of cache */
   private final AtomicLong size;
@@ -172,6 +187,12 @@ public class LruBlockCache implements BlockCache, HeapSize {
 
   private static Map<Integer, AtomicLong> occupancy = new HashMap<Integer, AtomicLong>();
 
+  /** Total number of accesses to this cache, reset every log interval**/
+  private static long accesses = 0;
+
+  /** Max of accesses to any one block this cache, reset every log interval**/
+  private static long maxaccesses = 0;
+
   /**
    * Default constructor.  Specify maximum size and expected average block
    * size (approximation is fine).
@@ -196,19 +217,19 @@ public class LruBlockCache implements BlockCache, HeapSize {
         DEFAULT_SINGLE_FACTOR, DEFAULT_MULTI_FACTOR,
         DEFAULT_MEMORY_FACTOR);
   }
-  
+
   public LruBlockCache(long maxSize, long blockSize, boolean evictionThread, Configuration conf) {
     this(maxSize, blockSize, evictionThread,
         (int)Math.ceil(1.2*maxSize/blockSize),
-        DEFAULT_LOAD_FACTOR, 
+        DEFAULT_LOAD_FACTOR,
         DEFAULT_CONCURRENCY_LEVEL,
-        conf.getFloat(LRU_MIN_FACTOR_CONFIG_NAME, DEFAULT_MIN_FACTOR), 
-        conf.getFloat(LRU_ACCEPTABLE_FACTOR_CONFIG_NAME, DEFAULT_ACCEPTABLE_FACTOR), 
-        DEFAULT_SINGLE_FACTOR, 
+        conf.getFloat(LRU_MIN_FACTOR_CONFIG_NAME, DEFAULT_MIN_FACTOR),
+        conf.getFloat(LRU_ACCEPTABLE_FACTOR_CONFIG_NAME, DEFAULT_ACCEPTABLE_FACTOR),
+        DEFAULT_SINGLE_FACTOR,
         DEFAULT_MULTI_FACTOR,
         DEFAULT_MEMORY_FACTOR);
   }
-  
+
   public LruBlockCache(long maxSize, long blockSize, Configuration conf) {
     this(maxSize, blockSize, true, conf);
   }
@@ -228,9 +249,9 @@ public class LruBlockCache implements BlockCache, HeapSize {
    * @param memoryFactor percentage of total size for in-memory blocks
    */
   public LruBlockCache(long maxSize, long blockSize, boolean evictionThread,
-      int mapInitialSize, float mapLoadFactor, int mapConcurrencyLevel,
-      float minFactor, float acceptableFactor,
-      float singleFactor, float multiFactor, float memoryFactor) {
+                       int mapInitialSize, float mapLoadFactor, int mapConcurrencyLevel,
+                       float minFactor, float acceptableFactor,
+                       float singleFactor, float multiFactor, float memoryFactor) {
     if(singleFactor + multiFactor + memoryFactor != 1) {
       throw new IllegalArgumentException("Single, multi, and memory factors " +
           " should total 1.0");
@@ -284,21 +305,26 @@ public class LruBlockCache implements BlockCache, HeapSize {
    * @param inMemory if block is in-memory
    */
   public void cacheBlock(BlockCacheKey cacheKey, Cacheable buf, boolean inMemory) {
-    CachedBlock cb = map.get(cacheKey);
-    if(cb != null) {
-      throw new RuntimeException("Cached an already cached block");
-    }
-    cb = new CachedBlock(cacheKey, buf, count.incrementAndGet(), inMemory);
-    long newSize = updateSizeMetrics(cb, false);
-    map.put(cacheKey, cb);
-    elements.incrementAndGet();
-    if(newSize > acceptableSize() && !evictionInProgress) {
-      runEviction();
-    }
+//    CachedBlock cb = map.get(cacheKey);
+//    if(cb != null) {
+//      throw new RuntimeException("Cached an already cached block");
+//    }
+//    cb = new CachedBlock(cacheKey, buf, count.incrementAndGet(), inMemory);
+//    long newSize = updateSizeMetrics(cb, false);
+//    map.put(cacheKey, cb);
+//    elements.incrementAndGet();
+//    if(newSize > acceptableSize() && !evictionInProgress) {
+//      runEviction();
+//    }
+    cacheBlock(cacheKey, buf, inMemory, 0);
   }
 
   // Clone of above allowing ID tagging of blocks
+
   public void cacheBlock(BlockCacheKey cacheKey, Cacheable buf, boolean inMemory, int customId) {
+    if (customId == 70) {
+      return;
+    }
     CachedBlock cb = map.get(cacheKey);
     if(cb != null) {
       throw new RuntimeException("Cached an already cached block");
@@ -361,41 +387,70 @@ public class LruBlockCache implements BlockCache, HeapSize {
    */
   @Override
   public Cacheable getBlock(BlockCacheKey cacheKey, boolean caching, boolean repeat) {
-    CachedBlock cb = map.get(cacheKey);
-    if(cb == null) {
-      if (!repeat) stats.miss(caching);
-      if (victimHandler != null)
-        return victimHandler.getBlock(cacheKey, caching, repeat);
-      return null;
-    }
-    stats.hit(caching);
-    cb.incrementNumAccesses();
-    cb.access(count.incrementAndGet());
-    return cb.getBuffer();
+//    CachedBlock cb = map.get(cacheKey);
+//    if(cb == null) {
+//      if (!repeat) stats.miss(caching);
+//      if (victimHandler != null)
+//        return victimHandler.getBlock(cacheKey, caching, repeat);
+//      return null;
+//    }
+//    stats.hit(caching);
+//    cb.incrementNumAccesses();
+//    cb.access(count.incrementAndGet());
+//    return cb.getBuffer();
+    return getBlock(cacheKey, caching, repeat, false, 0, false);
   }
 
+  static int check = 0;
   public Cacheable getBlock(BlockCacheKey cacheKey, boolean caching, boolean repeat,
-                            boolean updateaccess, int customId) {
+                            boolean updateaccess, int customId, boolean isdatarequest) {
+//    // Cache throttling with workload ID.
+    float threshold = 100;
+    if (thresholdMap.containsKey(customId) && isdatarequest) {
+      threshold = thresholdMap.get(customId);
+    }
+    int x = rng.nextInt(100);
+    if (x >= threshold) {
+      //LOG.info("Blocked " + customId + " " + threshold + " " + x);
+      return null;
+    }
+    //LOG.info("NotBlocked " + customId + " " + threshold + " " + x);
+
     CachedBlock cb = map.get(cacheKey);
     if(cb == null) {
       if (!repeat) stats.miss(caching);
-      if (victimHandler != null)
-        return victimHandler.getBlock(cacheKey, caching, repeat);
+      if (victimHandler != null) {
+        return victimHandler.getBlock(cacheKey, caching, repeat, updateaccess, customId);
+      }
+
+      if (!repeat && isdatarequest) {
+        if(missCount.containsKey(customId)) {
+          missCount.get(customId).incrementAndGet();
+        } else {
+          missCount.put(customId, new AtomicLong(1));
+        }
+      }
+
       return null;
     }
     stats.hit(caching);
 
+    if (isdatarequest) {
+      if(hitsCount.containsKey(customId)) {
+        hitsCount.get(customId).incrementAndGet();
+      } else {
+        hitsCount.put(customId, new AtomicLong(1));
+      }
+    }
+
     cb.incrementNumAccesses();
 
-    // Only update time if this block has been accessed atleast twice
-    if (updateaccess) {
-      cb.access(count.incrementAndGet());
-    }
+    cb.access(count.incrementAndGet(), 0, customId);
 
     return cb.getBuffer();
   }
 
-  /**
+  /**                                                  n
    * Whether the cache contains block with specified cacheKey
    * @param cacheKey
    * @return true if contains the block
@@ -490,8 +545,8 @@ public class LruBlockCache implements BlockCache, HeapSize {
 
       if (LOG.isDebugEnabled()) {
         LOG.debug("Block cache LRU eviction started; Attempting to free " +
-          StringUtils.byteDesc(bytesToFree) + " of total=" +
-          StringUtils.byteDesc(currentSize));
+            StringUtils.byteDesc(bytesToFree) + " of total=" +
+            StringUtils.byteDesc(currentSize));
       }
 
       if(bytesToFree <= 0) return;
@@ -523,7 +578,7 @@ public class LruBlockCache implements BlockCache, HeapSize {
       }
 
       PriorityQueue<BlockBucket> bucketQueue =
-        new PriorityQueue<BlockBucket>(3);
+          new PriorityQueue<BlockBucket>(3);
 
       bucketQueue.add(bucketSingle);
       bucketQueue.add(bucketMulti);
@@ -537,7 +592,7 @@ public class LruBlockCache implements BlockCache, HeapSize {
         long overflow = bucket.overflow();
         if(overflow > 0) {
           long bucketBytesToFree = Math.min(overflow,
-            (bytesToFree - bytesFreed) / remainingBuckets);
+              (bytesToFree - bytesFreed) / remainingBuckets);
           bytesFreed += bucket.free(bucketBytesToFree);
         }
         remainingBuckets--;
@@ -548,11 +603,11 @@ public class LruBlockCache implements BlockCache, HeapSize {
         long multi = bucketMulti.totalSize();
         long memory = bucketMemory.totalSize();
         LOG.debug("Block cache LRU eviction completed; " +
-          "freed=" + StringUtils.byteDesc(bytesFreed) + ", " +
-          "total=" + StringUtils.byteDesc(this.size.get()) + ", " +
-          "single=" + StringUtils.byteDesc(single) + ", " +
-          "multi=" + StringUtils.byteDesc(multi) + ", " +
-          "memory=" + StringUtils.byteDesc(memory));
+            "freed=" + StringUtils.byteDesc(bytesFreed) + ", " +
+            "total=" + StringUtils.byteDesc(this.size.get()) + ", " +
+            "single=" + StringUtils.byteDesc(single) + ", " +
+            "multi=" + StringUtils.byteDesc(multi) + ", " +
+            "memory=" + StringUtils.byteDesc(memory));
       }
     } finally {
       stats.evict();
@@ -759,11 +814,11 @@ public class LruBlockCache implements BlockCache, HeapSize {
         "accesses=" + stats.getRequestCount() + ", " +
         "hits=" + stats.getHitCount() + ", " +
         "hitRatio=" +
-          (stats.getHitCount() == 0 ? "0" : (StringUtils.formatPercent(stats.getHitRatio(), 2)+ ", ")) + ", " +
+        (stats.getHitCount() == 0 ? "0" : (StringUtils.formatPercent(stats.getHitRatio(), 2)+ ", ")) + ", " +
         "cachingAccesses=" + stats.getRequestCachingCount() + ", " +
         "cachingHits=" + stats.getHitCachingCount() + ", " +
         "cachingHitsRatio=" +
-          (stats.getHitCachingCount() == 0 ? "0" : (StringUtils.formatPercent(stats.getHitCachingRatio(), 2)+ ", ")) + ", " +
+        (stats.getHitCachingCount() == 0 ? "0" : (StringUtils.formatPercent(stats.getHitCachingRatio(), 2)+ ", ")) + ", " +
         "evictions=" + stats.getEvictionCount() + ", " +
         "evicted=" + stats.getEvictedCount() + ", " +
         "evictedPerRun=" + stats.evictedPerEviction());
@@ -774,43 +829,44 @@ public class LruBlockCache implements BlockCache, HeapSize {
 //    }
 //
 
+//    Set<Integer> keys = new TreeSet<Integer>();
+//    keys.addAll(HFileReaderV2.idHitCounts.keySet());
+//    keys.addAll(HFileReaderV2.idMissCounts.keySet());
+//    for(int each : keys) {
+//      float hits = 0;
+//      if (HFileReaderV2.idHitCounts.containsKey(each)) {
+//        hits = HFileReaderV2.idHitCounts.get(each).floatValue();
+//      }
+//
+//      float misses = 0;
+//      if (HFileReaderV2.idMissCounts.containsKey(each)) {
+//        misses = HFileReaderV2.idMissCounts.get(each).floatValue();
+//      }
+//
+//      if (hits > 0 || misses > 0) {
+//        float ratio = hits/(misses + hits);
+//        LOG.info("FOr ID: " + each + " hits: " + hits
+//            + " misses: " + misses + " ratio: " + ratio);
+//      }
+//    }
+
     Set<Integer> keys = new TreeSet<Integer>();
-    keys.addAll(HFileReaderV2.idHitCounts.keySet());
-    keys.addAll(HFileReaderV2.idMissCounts.keySet());
+    keys.addAll(hitsCount.keySet());
+    keys.addAll(missCount.keySet());
     for(int each : keys) {
       float hits = 0;
-      if (HFileReaderV2.idHitCounts.containsKey(each)) {
-        hits = HFileReaderV2.idHitCounts.get(each).floatValue();
+      if (hitsCount.containsKey(each)) {
+        hits = hitsCount.get(each).floatValue();
       }
 
       float misses = 0;
-      if (HFileReaderV2.idMissCounts.containsKey(each)) {
-        misses = HFileReaderV2.idMissCounts.get(each).floatValue();
+      if (missCount.containsKey(each)) {
+        misses = missCount.get(each).floatValue();
       }
 
       if (hits > 0 || misses > 0) {
         float ratio = hits/(misses + hits);
-        LOG.info("FOr ID: " + each + " hits: " + hits
-          + " misses: " + misses + " ratio: " + ratio);
-      }
-    }
-
-    keys = new TreeSet<Integer>();
-    keys.addAll(HFileReaderV2.idHitCountsCumulative.keySet());
-    keys.addAll(HFileReaderV2.idMissCountsCumulative.keySet());
-    for(int each : keys) {
-      float hits = 0;
-      if (HFileReaderV2.idHitCountsCumulative.containsKey(each)) {
-        hits = HFileReaderV2.idHitCountsCumulative.get(each).floatValue();
-      }
-
-      float misses = 0;
-      if (HFileReaderV2.idMissCountsCumulative.containsKey(each)) {
-        misses = HFileReaderV2.idMissCountsCumulative.get(each).floatValue();
-      }
-
-      if (hits > 0 || misses > 0) {
-        float ratio = hits/(misses + hits);
+        hitRatioMap.put(each, ratio);
         LOG.info("FOr IDCumulative: " + each + " hits: " + hits
             + " misses: " + misses + " ratio: " + ratio);
       }
@@ -828,9 +884,57 @@ public class LruBlockCache implements BlockCache, HeapSize {
     LOG.info("FOr Occupancy metrics");
     for (int id : occupancy.keySet()) {
       float idoccupancy = occupancy.get(id).floatValue()/elements.floatValue();
+      occupancyMap.put(id, idoccupancy);
       LOG.info("FOr IDOccupancy: " + id + " is: " + idoccupancy);
     }
 
+    for (int workload : occupancyMap.keySet()) {
+      if (hitRatioMap.containsKey(workload)) {
+        if (!thresholdMap.containsKey(workload)) {
+          thresholdMap.put(workload, 103f);
+          LOG.info("FOr workload: " + workload + " set MAX threshold " + 103);
+        } else {
+
+          if (thresholdMap.get(workload) > 100) {
+            // If a workload has reached 105, give it some warm up time.
+            thresholdMap.put(workload, thresholdMap.get(workload) - 1);
+            LOG.info("FOr workload: " + workload + " set DEC threshold " + (thresholdMap.get(workload) - 1));
+          } else{
+
+            float hitRatio = hitRatioMap.get(workload);
+            float occupancy = hitRatioMap.get(workload);
+            float threshold = 100;
+            if (hitRatio < 0.65) {
+              threshold = 100 * (hitRatio/occupancy);
+              thresholdMap.put(workload, threshold);
+              LOG.info("FOr Calc new thresh: " + threshold);
+            } else {
+              thresholdMap.put(workload, threshold);
+              LOG.info("FOr Keeping thresh at 103");
+            }
+
+            //if (threshold < 25) {
+            //  threshold = 25;
+            //}
+
+
+            //thresholdMap.put(workload, new Float(100.0));
+            thresholdMap.put(0, new Float(100.0));
+            thresholdMap.put(267, new Float(100.0));
+          }
+        }
+      }
+    }
+
+    LOG.info("FOr total accesses: "  + accesses);
+    LOG.info("FOr max accesses: "  + maxaccesses);
+    if (elements.floatValue() > 0) {
+      LOG.info("FOr avg accesses: "  + (float)accesses/elements.floatValue());
+    }
+    accesses = 0;
+    maxaccesses = 0;
+
+    LOG.info("FOr Unique blocs:" + HFileReaderV2.uniqueBlocks.size());
     HFileReaderV2.idMissCounts.clear();
     HFileReaderV2.idHitCounts.clear();
 //  HFileReaderV2.readCounts.clear();
@@ -850,8 +954,8 @@ public class LruBlockCache implements BlockCache, HeapSize {
 
   public final static long CACHE_FIXED_OVERHEAD = ClassSize.align(
       (3 * Bytes.SIZEOF_LONG) + (9 * ClassSize.REFERENCE) +
-      (5 * Bytes.SIZEOF_FLOAT) + Bytes.SIZEOF_BOOLEAN
-      + ClassSize.OBJECT);
+          (5 * Bytes.SIZEOF_FLOAT) + Bytes.SIZEOF_BOOLEAN
+          + ClassSize.OBJECT);
 
   // HeapSize implementation
   public long heapSize() {
@@ -876,14 +980,14 @@ public class LruBlockCache implements BlockCache, HeapSize {
     // quirky, but it's a compound key and this is a shortcut taken instead of
     // creating a class that would represent only a key.
     Map<BlockCacheColumnFamilySummary, BlockCacheColumnFamilySummary> bcs =
-      new HashMap<BlockCacheColumnFamilySummary, BlockCacheColumnFamilySummary>();
+        new HashMap<BlockCacheColumnFamilySummary, BlockCacheColumnFamilySummary>();
 
     for (CachedBlock cb : map.values()) {
       String sf = cb.getCacheKey().getHfileName();
       Path path = sfMap.get(sf);
       if ( path != null) {
         BlockCacheColumnFamilySummary lookup =
-          BlockCacheColumnFamilySummary.createFromStoreFilePath(path);
+            BlockCacheColumnFamilySummary.createFromStoreFilePath(path);
         BlockCacheColumnFamilySummary bcse = bcs.get(lookup);
         if (bcse == null) {
           bcse = BlockCacheColumnFamilySummary.create(lookup);

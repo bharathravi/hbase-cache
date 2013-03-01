@@ -326,6 +326,64 @@ public class BucketCache implements BlockCache, HeapSize {
   }
 
   /**
+     * Replica of getBlock()  to use cutomID.
+     * Get the buffer of the block with the specified key.
+     * @param key block's cache key
+     * @param caching true if the caller caches blocks on cache misses
+     * @param repeat Whether this is a repeat lookup for the same block
+     * @return buffer of specified cache key, or null if not in cache
+     */
+    public Cacheable getBlock(BlockCacheKey key, boolean caching, boolean repeat, boolean updateaccess, int customID) {
+      if (!cacheEnabled)
+        return null;
+      RAMQueueEntry re = ramCache.get(key);
+      if (re != null) {
+        cacheStats.hit(caching);
+        // TODO(bharath): Throttle access
+        if (updateaccess && customID != 70) {
+          re.access(accessCount.incrementAndGet());
+        }
+        return re.getData();
+      }
+      BucketEntry bucketEntry = backingMap.get(key);
+      if(bucketEntry!=null) {
+        long start = System.nanoTime();
+        IdLock.Entry lockEntry = null;
+        try {
+          lockEntry = offsetLock.getLockEntry(bucketEntry.offset());
+          if (bucketEntry.equals(backingMap.get(key))) {
+            int len = bucketEntry.getLength();
+            ByteBuffer bb = ByteBuffer.allocate(len);
+            ioEngine.read(bb, bucketEntry.offset());
+            Cacheable cachedBlock = bucketEntry.deserializerReference(
+                deserialiserMap).deserialize(bb, true);
+            long timeTaken = System.nanoTime() - start;
+            cacheStats.hit(caching);
+            cacheStats.ioHit(timeTaken);
+
+            // TODO(bharath): Throttle access
+            if (updateaccess && customID != 70) {
+              bucketEntry.access(accessCount.incrementAndGet());
+            }
+            if (this.ioErrorStartTime > 0) {
+              ioErrorStartTime = -1;
+            }
+            return cachedBlock;
+          }
+        } catch (IOException ioex) {
+          LOG.error("Failed reading block " + key + " from bucket cache", ioex);
+          checkIOErrorIsTolerated();
+        } finally {
+          if (lockEntry != null) {
+            offsetLock.releaseLockEntry(lockEntry);
+          }
+        }
+      }
+      if(!repeat)cacheStats.miss(caching);
+      return null;
+    }
+
+  /**
    * Get the buffer of the block with the specified key.
    * @param key block's cache key
    * @param caching true if the caller caches blocks on cache misses

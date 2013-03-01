@@ -287,6 +287,7 @@ public class HFileReaderV1 extends AbstractHFileReader {
         ", max: " + dataBlockIndexReader.getRootBlockCount());
     }
 
+    LOG.info("FOr V1 READDDDD");
     long offset = dataBlockIndexReader.getRootBlockOffset(block);
     BlockCacheKey cacheKey = new BlockCacheKey(name, offset);
 

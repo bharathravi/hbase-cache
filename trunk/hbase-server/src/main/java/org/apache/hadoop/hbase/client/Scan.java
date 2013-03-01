@@ -112,7 +112,7 @@ public class Scan extends OperationWithAttributes {
   private Map<byte [], NavigableSet<byte []>> familyMap =
     new TreeMap<byte [], NavigableSet<byte []>>(Bytes.BYTES_COMPARATOR);
   private Boolean loadColumnFamiliesOnDemand = null;
-  private int customID = -1;
+  private int customID = 267;
 
   /**
    * Create a Scan operation across all rows.

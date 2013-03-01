@@ -606,6 +606,8 @@ public final class ProtobufUtil {
     if (scan.getRowOffsetPerColumnFamily() > 0) {
       scanBuilder.setStoreOffset(scan.getRowOffsetPerColumnFamily());
     }
+
+    scanBuilder.setCustomId(scan.getCustomID());
     return scanBuilder.build();
   }
 
@@ -678,6 +680,10 @@ public final class ProtobufUtil {
           scan.addFamily(family);
         }
       }
+    }
+
+    if (proto.hasCustomId()) {
+      scan.setCustomID(proto.getCustomId());
     }
     return scan;
   }
