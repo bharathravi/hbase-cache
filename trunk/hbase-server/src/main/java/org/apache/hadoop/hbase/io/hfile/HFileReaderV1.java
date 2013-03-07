@@ -196,7 +196,7 @@ public class HFileReaderV1 extends AbstractHFileReader {
    * @throws IOException
    */
   @Override
-  public ByteBuffer getMetaBlock(String metaBlockName, boolean cacheBlock)
+  public ByteBuffer getMetaBlock(String metaBlockName, boolean cacheBlock, int customId)
       throws IOException {
     if (trailer.getMetaIndexCount() == 0) {
       return null; // there are no meta blocks
@@ -278,7 +278,7 @@ public class HFileReaderV1 extends AbstractHFileReader {
    * @throws IOException
    */
   ByteBuffer readBlockBuffer(int block, boolean cacheBlock,
-      final boolean pread, final boolean isCompaction) throws IOException {
+      final boolean pread, final boolean isCompaction, int customId) throws IOException {
     if (dataBlockIndexReader == null) {
       throw new IOException("Block index not loaded");
     }
@@ -418,14 +418,11 @@ public class HFileReaderV1 extends AbstractHFileReader {
     }
   }
 
-  @Override
-  public void setCustomId(int customId) {
-    this.customId = customId;
-  }
 
   protected abstract static class AbstractScannerV1
       extends AbstractHFileReader.Scanner {
     protected int currBlock;
+    protected int customId;
 
     /**
      * This masks a field with the same name in the superclass and saves us the
@@ -589,7 +586,7 @@ public class HFileReaderV1 extends AbstractHFileReader {
           return false;
         }
         blockBuffer = reader.readBlockBuffer(currBlock, cacheBlocks, pread,
-            isCompaction);
+            isCompaction, customId);
         currKeyLen = blockBuffer.getInt();
         currValueLen = blockBuffer.getInt();
         blockFetches++;
@@ -657,7 +654,7 @@ public class HFileReaderV1 extends AbstractHFileReader {
 
     @Override
     public void setCustomId(int customId) {
-      reader.setCustomId(customId);
+      this.customId = customId;
     }
 
     @Override
@@ -673,7 +670,7 @@ public class HFileReaderV1 extends AbstractHFileReader {
       }
       currBlock = 0;
       blockBuffer = reader.readBlockBuffer(currBlock, cacheBlocks, pread,
-          isCompaction);
+          isCompaction, customId);
       currKeyLen = blockBuffer.getInt();
       currValueLen = blockBuffer.getInt();
       blockFetches++;
@@ -684,13 +681,13 @@ public class HFileReaderV1 extends AbstractHFileReader {
     protected void loadBlock(int bloc, boolean rewind) throws IOException {
       if (blockBuffer == null) {
         blockBuffer = reader.readBlockBuffer(bloc, cacheBlocks, pread,
-            isCompaction);
+            isCompaction, customId);
         currBlock = bloc;
         blockFetches++;
       } else {
         if (bloc != currBlock) {
           blockBuffer = reader.readBlockBuffer(bloc, cacheBlocks, pread,
-              isCompaction);
+              isCompaction, customId);
           currBlock = bloc;
           blockFetches++;
         } else {
@@ -711,15 +708,22 @@ public class HFileReaderV1 extends AbstractHFileReader {
   @Override
   public HFileBlock readBlock(long offset, long onDiskBlockSize,
       boolean cacheBlock, boolean pread, boolean isCompaction,
-      BlockType expectedBlockType) {
+      BlockType expectedBlockType, int customId) {
     throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public HFileBlock readBlock(long offset, long onDiskBlockSize,
+      boolean cacheBlock, boolean pread, boolean isCompaction,
+      BlockType expectedBlockType) throws IOException {
+    throw new IOException("Unsupported op");
   }
 
   @Override
   public DataInput getGeneralBloomFilterMetadata() throws IOException {
     // Shouldn't cache Bloom filter blocks, otherwise server would abort when
     // splitting, see HBASE-6479
-    ByteBuffer buf = getMetaBlock(HFileWriterV1.BLOOM_FILTER_META_KEY, false);
+    ByteBuffer buf = getMetaBlock(HFileWriterV1.BLOOM_FILTER_META_KEY, false, customId);
     if (buf == null)
       return null;
     ByteArrayInputStream bais = new ByteArrayInputStream(buf.array(),

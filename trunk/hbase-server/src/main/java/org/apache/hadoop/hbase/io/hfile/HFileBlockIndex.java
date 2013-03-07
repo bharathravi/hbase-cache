@@ -175,10 +175,10 @@ public class HFileBlockIndex {
      */
     public HFileBlock seekToDataBlock(final byte[] key, int keyOffset,
         int keyLength, HFileBlock currentBlock, boolean cacheBlocks,
-        boolean pread, boolean isCompaction)
+        boolean pread, boolean isCompaction, int customId)
         throws IOException {
       BlockWithScanInfo blockWithScanInfo = loadDataBlockWithScanInfo(key, keyOffset, keyLength,
-          currentBlock, cacheBlocks, pread, isCompaction);
+          currentBlock, cacheBlocks, pread, isCompaction, customId);
       if (blockWithScanInfo == null) {
         return null;
       } else {
@@ -205,7 +205,7 @@ public class HFileBlockIndex {
      */
     public BlockWithScanInfo loadDataBlockWithScanInfo(final byte[] key, int keyOffset,
         int keyLength, HFileBlock currentBlock, boolean cacheBlocks,
-        boolean pread, boolean isCompaction)
+        boolean pread, boolean isCompaction, int customId)
         throws IOException {
       int rootLevelIndex = rootBlockContainingKey(key, keyOffset, keyLength);
       if (rootLevelIndex < 0 || rootLevelIndex >= blockOffsets.length) {
@@ -253,7 +253,7 @@ public class HFileBlockIndex {
           }
           block = cachingBlockReader.readBlock(currentOffset,
               currentOnDiskSize, shouldCache, pread, isCompaction,
-              expectedBlockType);
+              expectedBlockType, customId);
         }
 
         if (block == null) {
@@ -329,7 +329,7 @@ public class HFileBlockIndex {
         // Caching, using pread, assuming this is not a compaction.
         HFileBlock midLeafBlock = cachingBlockReader.readBlock(
             midLeafBlockOffset, midLeafBlockOnDiskSize, true, true, false,
-            BlockType.LEAF_INDEX);
+            BlockType.LEAF_INDEX, 0);
 
         ByteBuffer b = midLeafBlock.getBufferWithoutHeader();
         int numDataBlocks = b.getInt();

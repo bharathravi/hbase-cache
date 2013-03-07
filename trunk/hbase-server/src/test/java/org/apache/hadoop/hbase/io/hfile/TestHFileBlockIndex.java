@@ -141,6 +141,13 @@ public class TestHFileBlockIndex {
     }
 
     @Override
+    public HFileBlock readBlock(long offset, long onDiskBlockSize,
+        boolean cacheBlock, boolean pread, boolean isCompaction,
+        BlockType expectedBlockType, int customId) throws IOException {
+      throw new IOException();
+    }
+
+    @Override
     public HFileBlock readBlock(long offset, long onDiskSize,
         boolean cacheBlock, boolean pread, boolean isCompaction,
         BlockType expectedBlockType)
@@ -187,7 +194,7 @@ public class TestHFileBlockIndex {
       assertTrue(key != null);
       assertTrue(indexReader != null);
       HFileBlock b = indexReader.seekToDataBlock(key, 0, key.length, null,
-          true, true, false);
+          true, true, false, 0);
       if (Bytes.BYTES_RAWCOMPARATOR.compare(key, firstKeyInFile) < 0) {
         assertTrue(b == null);
         ++i;

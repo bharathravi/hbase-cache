@@ -104,6 +104,11 @@ public class CachedBlock implements HeapSize, Comparable<CachedBlock> {
   static boolean btlogged = false;
   private static final Log LOG = LogFactory.getLog(CachedBlock.class);
   public void access(long accessTime, long threshold, int customid) {
+
+    if (customid != 80 && customid != 90) {
+      return;
+    }
+
     this.accessTime = accessTime;
 
     if (this.priority == BlockPriority.SINGLE) { // && numAccesses > threshold) { // TODO(CACHECHANGE): BUCKETTHROTTLING ENABLED

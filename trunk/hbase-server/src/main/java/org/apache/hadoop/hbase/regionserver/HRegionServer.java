@@ -2723,6 +2723,7 @@ public class  HRegionServer implements ClientProtocol,
         }
         byte[] row = get.getRow().toByteArray();
         byte[] family = get.getColumn(0).getFamily().toByteArray();
+        //LOG.info("FOr CLOSEST BEFORE ROW");
         r = region.getClosestRowBefore(row, family);
       } else {
         Get clientGet = ProtobufUtil.toGet(get);
@@ -2730,6 +2731,7 @@ public class  HRegionServer implements ClientProtocol,
           existence = region.getCoprocessorHost().preExists(clientGet);
         }
         if (existence == null) {
+          //LOG.info("FOr DIRECT GET: NO COPROCESSOR");
           r = region.get(clientGet);
           if (request.getExistenceOnly()) {
             boolean exists = r != null && !r.isEmpty();

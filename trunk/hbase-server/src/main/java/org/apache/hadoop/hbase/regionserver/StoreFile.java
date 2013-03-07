@@ -1536,7 +1536,7 @@ public class StoreFile {
           shouldCheckBloom = true;
         } else {
           bloom = reader.getMetaBlock(HFileWriterV1.BLOOM_FILTER_DATA_KEY,
-              true);
+              true, 0);
           shouldCheckBloom = bloom != null;
         }
 

@@ -1707,6 +1707,7 @@ public class HStore implements Store, StoreConfiguration {
     try {
       KeyValueScanner scanner = null;
       if (getHRegion().getCoprocessorHost() != null) {
+        //LOG.info("FOr COPROCESSOR GETTING HSTORE SCANNER");
         scanner = getHRegion().getCoprocessorHost().preStoreScannerOpen(this, scan, targetCols);
       }
       if (scanner == null) {

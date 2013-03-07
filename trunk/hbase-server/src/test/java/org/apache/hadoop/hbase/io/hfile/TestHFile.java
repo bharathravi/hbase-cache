@@ -275,7 +275,7 @@ public class TestHFile extends HBaseTestCase {
 
   private void readNumMetablocks(Reader reader, int n) throws IOException {
     for (int i = 0; i < n; i++) {
-      ByteBuffer actual = reader.getMetaBlock("HFileMeta" + i, false);
+      ByteBuffer actual = reader.getMetaBlock("HFileMeta" + i, false, 0);
       ByteBuffer expected = 
         ByteBuffer.wrap(("something to test" + i).getBytes());
       assertTrue("failed to match metadata", actual.compareTo(expected) == 0);
@@ -332,7 +332,7 @@ public class TestHFile extends HBaseTestCase {
       fout.close();
       Reader reader = HFile.createReader(fs, mFile, cacheConf);
       reader.loadFileInfo();
-      assertNull(reader.getMetaBlock("non-existant", false));
+      assertNull(reader.getMetaBlock("non-existant", false, 0));
     }
   }
 

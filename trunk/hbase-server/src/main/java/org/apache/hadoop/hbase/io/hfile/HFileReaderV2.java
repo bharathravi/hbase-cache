@@ -38,6 +38,7 @@ import org.apache.hadoop.hbase.io.encoding.DataBlockEncoding;
 import org.apache.hadoop.hbase.io.hfile.HFile.FileInfo;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.IdLock;
+import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.io.WritableUtils;
 
 /**
@@ -55,7 +56,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
   private static int KEY_VALUE_LEN_SIZE = 2 * Bytes.SIZEOF_INT;
 
   private boolean includesMemstoreTS = false;
-  private int customId;
+  //private int customId;
   public static Map<Integer, AtomicLong> idHitCounts = new HashedMap();
   public static Map<Integer, AtomicLong> idMissCounts = new HashedMap();
 
@@ -106,13 +107,13 @@ public class HFileReaderV2 extends AbstractHFileReader {
    *          still use its on-disk encoding in cache.
    */
   public HFileReaderV2(Path path, FixedFileTrailer trailer,
-      final FSDataInputStream fsdis, final FSDataInputStream fsdisNoFsChecksum,
-      final long size,
-      final boolean closeIStream, final CacheConfig cacheConf,
-      DataBlockEncoding preferredEncodingInCache, final HFileSystem hfs)
+                       final FSDataInputStream fsdis, final FSDataInputStream fsdisNoFsChecksum,
+                       final long size,
+                       final boolean closeIStream, final CacheConfig cacheConf,
+                       DataBlockEncoding preferredEncodingInCache, final HFileSystem hfs)
       throws IOException {
     super(path, trailer, fsdis, fsdisNoFsChecksum, size,
-          closeIStream, cacheConf, hfs);
+        closeIStream, cacheConf, hfs);
     trailer.expectMajorVersion(2);
     validateMinorVersion(path, trailer.getMinorVersion());
     HFileBlock.FSReaderV2 fsBlockReaderV2 = new HFileBlock.FSReaderV2(fsdis,
@@ -181,9 +182,9 @@ public class HFileReaderV2 extends AbstractHFileReader {
    * @param isCompaction is scanner being used for a compaction?
    * @return Scanner on this file.
    */
-   @Override
-   public HFileScanner getScanner(boolean cacheBlocks, final boolean pread,
-      final boolean isCompaction) {
+  @Override
+  public HFileScanner getScanner(boolean cacheBlocks, final boolean pread,
+                                 final boolean isCompaction) {
     // check if we want to use data block encoding in memory
     if (dataBlockEncoder.useEncodedScanner(isCompaction)) {
       return new EncodedScannerV2(this, cacheBlocks, pread, isCompaction,
@@ -200,7 +201,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
    * @throws IOException
    */
   @Override
-  public ByteBuffer getMetaBlock(String metaBlockName, boolean cacheBlock)
+  public ByteBuffer getMetaBlock(String metaBlockName, boolean cacheBlock, int customId)
       throws IOException {
     if (trailer.getMetaIndexCount() == 0) {
       return null; // there are no meta blocks
@@ -231,7 +232,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
         LruBlockCache cache = (LruBlockCache) cacheConf.getBlockCache();
 
         HFileBlock cachedBlock =
-          (HFileBlock) cache.getBlock(cacheKey, cacheBlock, false, true, customId, false);
+            (HFileBlock) cache.getBlock(cacheKey, cacheBlock, false, true, customId, false).getFirst();
         if (cachedBlock != null) {
           // Return a distinct 'shallow copy' of the block,
           // so pos does not get messed by the scanner
@@ -275,12 +276,13 @@ public class HFileReaderV2 extends AbstractHFileReader {
    * @return Block wrapped in a ByteBuffer.
    * @throws IOException
    */
-  static boolean dtlogged = false;
-  public static Set<BlockCacheKey> uniqueBlocks = new HashSet<BlockCacheKey>();
-  @Override
+  public static Set<BlockCacheKey> uniqueBlocks = Collections.synchronizedSet(new HashSet<BlockCacheKey>());
+  public static HashMap<Integer, Set<BlockCacheKey>> uniqueBlockCounts
+      = new HashMap<Integer, Set<BlockCacheKey>>();
+
   public HFileBlock readBlock(long dataBlockOffset, long onDiskBlockSize,
-      final boolean cacheBlock, boolean pread, final boolean isCompaction,
-      BlockType expectedBlockType)
+                              final boolean cacheBlock, boolean pread, final boolean isCompaction,
+                              BlockType expectedBlockType, int customId)
       throws IOException {
     if (dataBlockIndexReader == null) {
       throw new IOException("Block index not loaded");
@@ -304,67 +306,73 @@ public class HFileReaderV2 extends AbstractHFileReader {
 
     boolean useLock = false;
     IdLock.Entry lockEntry = null;
+    boolean wasBlocked = false;
     try {
       while (true) {
-
         if (useLock) {
           lockEntry = offsetLock.getLockEntry(dataBlockOffset);
         }
 
-        // Check cache for block. If found return.
-        if (cacheConf.isBlockCacheEnabled()) {
-          // Try and get the block from the block cache. If the useLock variable is true then this
-          // is the second time through the loop and it should not be counted as a block cache miss.
-          LruBlockCache cache = (LruBlockCache) cacheConf.getBlockCache();
+        if (customId != 140) {
+          // Check cache for block. If found return.
+          if (cacheConf.isBlockCacheEnabled()) {
+            // Try and get the block from the block cache. If the useLock variable is true then this
+            // is the second time through the loop and it should not be counted as a block cache miss.
+            LruBlockCache cache = (LruBlockCache) cacheConf.getBlockCache();
 
-          // TODO(bharath): Proof that this cache is indeed the LruBlockCache
-          //if (cacheConf.getBlockCache() instanceof LruBlockCache) {
-          //LOG.info("YESSSS RIGHT CACHE");
-          //}
+            // TODO(bharath): Proof that this cache is indeed the LruBlockCache
+            //if (cacheConf.getBlockCache() instanceof LruBlockCache) {
+            //LOG.info("YESSSS RIGHT CACHE");
+            //}
 
 
-          HFileBlock cachedBlock = (HFileBlock) cache.getBlock(cacheKey,
-              cacheBlock, useLock, true, customId, expectedBlockType == BlockType.DATA);
+            Pair<Cacheable, Boolean> returnPair = cache.getBlock(cacheKey,
+                cacheBlock, useLock, true, customId, expectedBlockType == BlockType.DATA);
 
-          if (cachedBlock != null) {
-            if (cachedBlock.getBlockType() == BlockType.DATA) {
-              HFile.dataBlockReadCnt.incrementAndGet();
-            }
+            HFileBlock cachedBlock = (HFileBlock) returnPair.getFirst();
+            wasBlocked = returnPair.getSecond();
 
-            validateBlockType(cachedBlock, expectedBlockType);
-
-            // Validate encoding type for encoded blocks. We include encoding
-            // type in the cache key, and we expect it to match on a cache hit.
-            if (cachedBlock.getBlockType() == BlockType.ENCODED_DATA
-                && cachedBlock.getDataBlockEncoding() != dataBlockEncoder.getEncodingInCache()) {
-              throw new IOException("Cached block under key " + cacheKey + " "
-                  + "has wrong encoding: " + cachedBlock.getDataBlockEncoding() + " (expected: "
-                  + dataBlockEncoder.getEncodingInCache() + ")");
-            }
-
-            if (cachedBlock.getBlockType() == BlockType.DATA) {
-              if (idHitCounts.containsKey(customId)) {
-                idHitCounts.get(customId).incrementAndGet();
-              } else {
-                idHitCounts.put(customId, new AtomicLong((1)));
+            if (cachedBlock != null) {
+              if (cachedBlock.getBlockType() == BlockType.DATA) {
+                HFile.dataBlockReadCnt.incrementAndGet();
               }
 
-              if (idHitCountsCumulative.containsKey(customId)) {
-                idHitCountsCumulative.get(customId).incrementAndGet();
-              } else {
-                idHitCountsCumulative.put(customId, new AtomicLong((1)));
-              }
-            }
+              validateBlockType(cachedBlock, expectedBlockType);
 
-            return cachedBlock;
+              // Validate encoding type for encoded blocks. We include encoding
+              // type in the cache key, and we expect it to match on a cache hit.
+              if (cachedBlock.getBlockType() == BlockType.ENCODED_DATA
+                  && cachedBlock.getDataBlockEncoding() != dataBlockEncoder.getEncodingInCache()) {
+                throw new IOException("Cached block under key " + cacheKey + " "
+                    + "has wrong encoding: " + cachedBlock.getDataBlockEncoding() + " (expected: "
+                    + dataBlockEncoder.getEncodingInCache() + ")");
+              }
+
+//            if (cachedBlock.getBlockType() == BlockType.DATA) {
+//              if (idHitCounts.containsKey(customId)) {
+//                idHitCounts.get(customId).incrementAndGet();
+//              } else {
+//                idHitCounts.put(customId, new AtomicLong((1)));
+//              }
+//
+//              if (idHitCountsCumulative.containsKey(customId)) {
+//                idHitCountsCumulative.get(customId).incrementAndGet();
+//              } else {
+//                idHitCountsCumulative.put(customId, new AtomicLong((1)));
+//              }
+//            }
+
+              return cachedBlock;
+            }
+            // Carry on, please load.
           }
-          // Carry on, please load.
+          if (!useLock) {
+            // check cache again with lock
+            useLock = true;
+            continue;
+          }
         }
-        if (!useLock) {
-          // check cache again with lock
-          useLock = true;
-          continue;
-        }
+
 
         // Load block from filesystem.
         long startTimeNs = System.nanoTime();
@@ -377,33 +385,43 @@ public class HFileReaderV2 extends AbstractHFileReader {
         HFile.offerReadLatency(delta, pread);
 
         // Cache miss
-        if (hfileBlock.getBlockType() == BlockType.DATA) {
-          if (idMissCounts.containsKey(customId)) {
-            idMissCounts.get(customId).incrementAndGet();
-          } else {
-            idMissCounts.put(customId, new AtomicLong((1)));
-          }
-
-          if (idMissCountsCumulative.containsKey(customId)) {
-            idMissCountsCumulative.get(customId).incrementAndGet();
-          } else {
-            idMissCountsCumulative.put(customId, new AtomicLong((1)));
-          }
-        }
+//        if (hfileBlock.getBlockType() == BlockType.DATA) {
+//          if (idMissCounts.containsKey(customId)) {
+//            idMissCounts.get(customId).incrementAndGet();
+//          } else {
+//            idMissCounts.put(customId, new AtomicLong((1)));
+//          }
+//
+//          if (idMissCountsCumulative.containsKey(customId)) {
+//            idMissCountsCumulative.get(customId).incrementAndGet();
+//          } else {
+//            idMissCountsCumulative.put(customId, new AtomicLong((1)));
+//          }
+//        }
 
 
         // MAINPLACE
         // Cache the block if necessary
-        if (cacheBlock && cacheConf.shouldCacheBlockOnRead(hfileBlock.getBlockType().getCategory())) {
+        // If this request was blocked from cache access, don't try to place the block in cache.
+        if (customId != 70 && customId != 140 && cacheBlock
+            && cacheConf.shouldCacheBlockOnRead(hfileBlock.getBlockType().getCategory())) {
           LruBlockCache cache = (LruBlockCache) cacheConf.getBlockCache();
           cache.cacheBlock(cacheKey, hfileBlock, cacheConf.isInMemory(), customId);
         }
 
-        if (hfileBlock.getBlockType() == BlockType.DATA &&
-            !uniqueBlocks.contains(cacheKey)) {
+//        if (hfileBlock.getBlockType() == BlockType.DATA &&
+//            !uniqueBlocks.contains(cacheKey)) {
+//          uniqueBlocks.add(cacheKey);
+//        }
+//        hfileBlock.reads.incrementAndGet();
+        if (hfileBlock.getBlockType() == BlockType.DATA) {
           uniqueBlocks.add(cacheKey);
+          if (!uniqueBlockCounts.containsKey(customId)) {
+            uniqueBlockCounts.put(customId,
+                Collections.synchronizedSet(new HashSet<BlockCacheKey>()));
+          }
+          uniqueBlockCounts.get(customId).add(cacheKey);
         }
-        hfileBlock.reads.incrementAndGet();
         return hfileBlock;
       }
     } finally {
@@ -411,6 +429,12 @@ public class HFileReaderV2 extends AbstractHFileReader {
         offsetLock.releaseLockEntry(lockEntry);
       }
     }
+  }
+
+  @Override
+  public HFileBlock readBlock(long offset, long onDiskBlockSize, boolean cacheBlock,
+      boolean pread, boolean isCompaction, BlockType expectedBlockType) throws IOException {
+    return readBlock(offset, onDiskBlockSize, cacheBlock, pread, isCompaction, expectedBlockType, 0);
   }
 
   /**
@@ -423,7 +447,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
    *          check
    */
   private void validateBlockType(HFileBlock block,
-      BlockType expectedBlockType) throws IOException {
+                                 BlockType expectedBlockType) throws IOException {
     if (expectedBlockType == null) {
       return;
     }
@@ -470,7 +494,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
       int numEvicted = cacheConf.getBlockCache().evictBlocksByHfileName(name);
       if (LOG.isTraceEnabled()) {
         LOG.trace("On close, file=" + name + " evicted=" + numEvicted
-          + " block(s)");
+            + " block(s)");
       }
     }
     if (closeIStream) {
@@ -485,14 +509,10 @@ public class HFileReaderV2 extends AbstractHFileReader {
     }
   }
 
-  @Override
-  public void setCustomId(int customId) {
-    this.customId = customId;
-  }
-
   protected abstract static class AbstractScannerV2
       extends AbstractHFileReader.Scanner {
     protected HFileBlock block;
+    protected int customId;
 
     /**
      * The next indexed key is to keep track of the indexed key of the next data block.
@@ -504,7 +524,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
     protected byte[] nextIndexedKey;
 
     public AbstractScannerV2(HFileReaderV2 r, boolean cacheBlocks,
-        final boolean pread, final boolean isCompaction) {
+                             final boolean pread, final boolean isCompaction) {
       super(r, cacheBlocks, pread, isCompaction);
     }
 
@@ -527,8 +547,8 @@ public class HFileReaderV2 extends AbstractHFileReader {
       HFileBlockIndex.BlockIndexReader indexReader =
           reader.getDataBlockIndexReader();
       BlockWithScanInfo blockWithScanInfo =
-        indexReader.loadDataBlockWithScanInfo(key, offset, length, block,
-            cacheBlocks, pread, isCompaction);
+          indexReader.loadDataBlockWithScanInfo(key, offset, length, block,
+              cacheBlocks, pread, isCompaction, customId);
       if (blockWithScanInfo == null || blockWithScanInfo.getHFileBlock() == null) {
         // This happens if the key e.g. falls before the beginning of the file.
         return -1;
@@ -540,7 +560,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
     protected abstract ByteBuffer getFirstKeyInBlock(HFileBlock curBlock);
 
     protected abstract int loadBlockAndSeekToKey(HFileBlock seekToBlock, byte[] nextIndexedKey,
-        boolean rewind, byte[] key, int offset, int length, boolean seekBefore)
+                                                 boolean rewind, byte[] key, int offset, int length, boolean seekBefore)
         throws IOException;
 
     @Override
@@ -564,8 +584,8 @@ public class HFileReaderV2 extends AbstractHFileReader {
         } else {
           if (this.nextIndexedKey != null &&
               (this.nextIndexedKey == HConstants.NO_NEXT_INDEXED_KEY ||
-               reader.getComparator().compare(key, offset, length,
-                   nextIndexedKey, 0, nextIndexedKey.length) < 0)) {
+                  reader.getComparator().compare(key, offset, length,
+                      nextIndexedKey, 0, nextIndexedKey.length) < 0)) {
             // The reader shall continue to scan the current data block instead of querying the
             // block index as long as it knows the target key is strictly smaller than
             // the next indexed key or the current data block is the last data block.
@@ -579,12 +599,11 @@ public class HFileReaderV2 extends AbstractHFileReader {
       return seekTo(key, offset, length, false);
     }
 
-    @Override
     public boolean seekBefore(byte[] key, int offset, int length)
         throws IOException {
       HFileBlock seekToBlock =
           reader.getDataBlockIndexReader().seekToDataBlock(key, offset, length,
-              block, cacheBlocks, pread, isCompaction);
+              block, cacheBlocks, pread, isCompaction, customId);
       if (seekToBlock == null) {
         return false;
       }
@@ -605,7 +624,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
         // figure out the size.
         seekToBlock = reader.readBlock(previousBlockOffset,
             seekToBlock.getOffset() - previousBlockOffset, cacheBlocks,
-            pread, isCompaction, BlockType.DATA);
+            pread, isCompaction, BlockType.DATA, customId);
         // TODO shortcut: seek forward in this block to the last key of the
         // block.
       }
@@ -622,7 +641,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
      * @return the next block, or null if there are no more data blocks
      * @throws IOException
      */
-    protected HFileBlock readNextDataBlock() throws IOException {
+    protected HFileBlock readNextDataBlock(int customId) throws IOException {
       long lastDataBlockOffset = reader.getTrailer().getLastDataBlockOffset();
       if (block == null)
         return null;
@@ -642,7 +661,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
         curBlock = reader.readBlock(curBlock.getOffset()
             + curBlock.getOnDiskSizeWithHeader(),
             curBlock.getNextBlockOnDiskSizeWithHeader(), cacheBlocks, pread,
-            isCompaction, null);
+            isCompaction, null, customId);
       } while (!(curBlock.getBlockType().equals(BlockType.DATA) ||
           curBlock.getBlockType().equals(BlockType.ENCODED_DATA)));
 
@@ -657,7 +676,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
     private HFileReaderV2 reader;
 
     public ScannerV2(HFileReaderV2 r, boolean cacheBlocks,
-        final boolean pread, final boolean isCompaction) {
+                     final boolean pread, final boolean isCompaction) {
       super(r, cacheBlocks, pread, isCompaction);
       this.reader = r;
     }
@@ -737,7 +756,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
         }
 
         // read the next block
-        HFileBlock nextBlock = readNextDataBlock();
+        HFileBlock nextBlock = readNextDataBlock(customId);
         if (nextBlock == null) {
           setNonSeekedState();
           return false;
@@ -759,7 +778,6 @@ public class HFileReaderV2 extends AbstractHFileReader {
      *         the current key and value are undefined.
      * @throws IOException
      */
-    @Override
     public boolean seekTo() throws IOException {
       if (reader == null) {
         return false;
@@ -779,7 +797,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
       }
 
       block = reader.readBlock(firstDataBlockOffset, -1, cacheBlocks, pread,
-          isCompaction, BlockType.DATA);
+          isCompaction, BlockType.DATA, customId);
       if (block.getOffset() < 0) {
         throw new IOException("Invalid block offset: " + block.getOffset());
       }
@@ -789,7 +807,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
 
     @Override
     protected int loadBlockAndSeekToKey(HFileBlock seekToBlock, byte[] nextIndexedKey,
-        boolean rewind, byte[] key, int offset, int length, boolean seekBefore)
+                                        boolean rewind, byte[] key, int offset, int length, boolean seekBefore)
         throws IOException {
       if (block == null || block.getOffset() != seekToBlock.getOffset()) {
         updateCurrBlock(seekToBlock);
@@ -870,7 +888,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
      * @return 0 in case of an exact key match, 1 in case of an inexact match
      */
     private int blockSeek(byte[] key, int offset, int length,
-        boolean seekBefore) {
+                          boolean seekBefore) {
       int klen, vlen;
       long memstoreTS = 0;
       int memstoreTSLen = 0;
@@ -968,7 +986,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
 
     @Override
     public void setCustomId(int customId) {
-      this.reader.setCustomId(customId) ;
+      this.customId = customId;
     }
   }
 
@@ -981,7 +999,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
     private final boolean includesMemstoreTS;
 
     public EncodedScannerV2(HFileReaderV2 reader, boolean cacheBlocks,
-        boolean pread, boolean isCompaction, boolean includesMemstoreTS) {
+                            boolean pread, boolean isCompaction, boolean includesMemstoreTS) {
       super(reader, cacheBlocks, pread, isCompaction);
       this.includesMemstoreTS = includesMemstoreTS;
     }
@@ -1024,13 +1042,13 @@ public class HFileReaderV2 extends AbstractHFileReader {
       ByteBuffer origBlock = newBlock.getBufferReadOnly();
       ByteBuffer encodedBlock = ByteBuffer.wrap(origBlock.array(),
           origBlock.arrayOffset() + newBlock.headerSize() +
-          DataBlockEncoding.ID_SIZE,
+              DataBlockEncoding.ID_SIZE,
           newBlock.getUncompressedSizeWithoutHeader() -
-          DataBlockEncoding.ID_SIZE).slice();
+              DataBlockEncoding.ID_SIZE).slice();
       return encodedBlock;
     }
 
-    @Override
+
     public boolean seekTo() throws IOException {
       if (reader == null) {
         return false;
@@ -1049,7 +1067,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
       }
 
       block = reader.readBlock(firstDataBlockOffset, -1, cacheBlocks, pread,
-          isCompaction, BlockType.DATA);
+          isCompaction, BlockType.DATA, customId);
       if (block.getOffset() < 0) {
         throw new IOException("Invalid block offset: " + block.getOffset());
       }
@@ -1061,7 +1079,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
     public boolean next() throws IOException {
       boolean isValid = seeker.next();
       if (!isValid) {
-        block = readNextDataBlock();
+        block = readNextDataBlock(customId);
         isValid = block != null;
         if (isValid) {
           updateCurrentBlock(block);
@@ -1106,7 +1124,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
 
     @Override
     public void setCustomId(int customId) {
-      this.reader.setCustomId(customId);
+      this.customId = customId;
     }
 
     private void assertValidSeek() {
@@ -1122,7 +1140,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
 
     @Override
     protected int loadBlockAndSeekToKey(HFileBlock seekToBlock, byte[] nextIndexedKey,
-        boolean rewind, byte[] key, int offset, int length, boolean seekBefore)
+                                        boolean rewind, byte[] key, int offset, int length, boolean seekBefore)
         throws IOException  {
       if (block == null || block.getOffset() != seekToBlock.getOffset()) {
         updateCurrentBlock(seekToBlock);
@@ -1149,7 +1167,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
   }
 
   private DataInput getBloomFilterMetadata(BlockType blockType)
-  throws IOException {
+      throws IOException {
     if (blockType != BlockType.GENERAL_BLOOM_META &&
         blockType != BlockType.DELETE_FAMILY_BLOOM_META) {
       throw new RuntimeException("Block Type: " + blockType.toString() +
@@ -1175,9 +1193,9 @@ public class HFileReaderV2 extends AbstractHFileReader {
     if (minorVersion < MIN_MINOR_VERSION ||
         minorVersion > MAX_MINOR_VERSION) {
       String msg = "Minor version for path " + path +
-                   " is expected to be between " +
-                   MIN_MINOR_VERSION + " and " + MAX_MINOR_VERSION +
-                   " but is found to be " + minorVersion;
+          " is expected to be between " +
+          MIN_MINOR_VERSION + " and " + MAX_MINOR_VERSION +
+          " but is found to be " + minorVersion;
       LOG.error(msg);
       throw new RuntimeException(msg);
     }

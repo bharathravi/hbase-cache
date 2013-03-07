@@ -461,8 +461,13 @@ public class HFile {
   public interface CachingBlockReader {
     HFileBlock readBlock(long offset, long onDiskBlockSize,
         boolean cacheBlock, final boolean pread, final boolean isCompaction,
-        BlockType expectedBlockType)
+        BlockType expectedBlockType, int customId)
         throws IOException;
+
+    HFileBlock readBlock(long offset, long onDiskBlockSize,
+            boolean cacheBlock, final boolean pread, final boolean isCompaction,
+            BlockType expectedBlockType)
+            throws IOException;
   }
 
   /** An interface used by clients to open and iterate an {@link HFile}. */
@@ -480,7 +485,7 @@ public class HFile {
        final boolean pread, final boolean isCompaction);
 
     ByteBuffer getMetaBlock(String metaBlockName,
-       boolean cacheBlock) throws IOException;
+       boolean cacheBlock, int customId) throws IOException;
 
     Map<byte[], byte[]> loadFileInfo() throws IOException;
 
@@ -528,8 +533,6 @@ public class HFile {
     void close(boolean evictOnClose) throws IOException;
 
     DataBlockEncoding getEncodingOnDisk();
-
-    void setCustomId(int customId);
   }
 
   /**

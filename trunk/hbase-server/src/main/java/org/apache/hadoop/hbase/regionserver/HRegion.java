@@ -1724,6 +1724,7 @@ public class HRegion implements HeapSize { // , Writable{
     if (coprocessorHost != null) {
       Result result = new Result();
       if (coprocessorHost.preGetClosestRowBefore(row, family, result)) {
+        //LOG.info("FOr using Coprocessor in getClosestRowBefore");
         return result;
       }
     }
@@ -3450,8 +3451,6 @@ public class HRegion implements HeapSize { // , Writable{
           scan.getFamilyMap().entrySet()) {
         Store store = stores.get(entry.getKey());
 
-        // TODO(bharath): We set scanner's customid in the constructor, since otherwise we have
-        // to update the whole interface.
         KeyValueScanner scanner = store.getScanner(scan, entry.getValue());
 
 
@@ -4412,6 +4411,7 @@ public class HRegion implements HeapSize { // , Writable{
 
     // pre-get CP hook
     if (withCoprocessor && (coprocessorHost != null)) {
+      //LOG.info("FOr COPROCESSOR IN GET");
        if (coprocessorHost.preGet(get, results)) {
          return results;
        }
