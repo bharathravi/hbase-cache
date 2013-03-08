@@ -62,6 +62,16 @@ public class CachedBlock implements HeapSize, Comparable<CachedBlock> {
   private BlockPriority priority;
   private volatile long numAccesses = 0;
 
+  public boolean isUsed() {
+    return used;
+  }
+
+  public void setUsed(boolean used) {
+    this.used = used;
+  }
+
+  private boolean used = false;
+
   public int getCustomId() {
     return customId;
   }

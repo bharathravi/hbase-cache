@@ -56,7 +56,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
   private static int KEY_VALUE_LEN_SIZE = 2 * Bytes.SIZEOF_INT;
 
   private boolean includesMemstoreTS = false;
-  //private int customId;
+
   public static Map<Integer, AtomicLong> idHitCounts = new HashedMap();
   public static Map<Integer, AtomicLong> idMissCounts = new HashedMap();
 
