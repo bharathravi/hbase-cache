@@ -340,6 +340,7 @@ public class LruBlockCache implements BlockCache, HeapSize {
     if (customId == 150) {
       threshold = 10;
     }
+
     int x = rng.nextInt(100);
     if (x >= threshold) {
       return;
@@ -354,8 +355,22 @@ public class LruBlockCache implements BlockCache, HeapSize {
     cb.setUsed(false);
 
     long newSize = updateSizeMetrics(cb, false);
+
+//    if (customId == 70 || customId == 140) {
+//      return;
+//    }
+
     map.put(cacheKey, cb);
     elements.incrementAndGet();
+
+    if(newSize > acceptableSize() && !evictionInProgress) {
+        runEviction();
+    }
+
+
+// YESPROB   if (customId == 70 || customId == 140) {
+//               return;
+//     }
 
     if (occupancy.containsKey(customId)) {
       occupancy.get(customId).incrementAndGet();
@@ -369,10 +384,11 @@ public class LruBlockCache implements BlockCache, HeapSize {
       cachePlacementCount.put(customId, new AtomicLong(1));
     }
 
-    if(newSize > acceptableSize() && !evictionInProgress) {
-      LOG.info("FOr RUN EVOCTION FROM CACHE BLOCK");
-      runEviction();
-    }
+
+// YESPROB   if (customId == 70 || customId == 140) {
+//              return;
+//    }
+
   }
 
   /**
@@ -437,9 +453,14 @@ public class LruBlockCache implements BlockCache, HeapSize {
    */
   public Pair<Cacheable, Boolean> getBlock(BlockCacheKey cacheKey, boolean caching, boolean repeat,
                                            boolean updateaccess, int customId, boolean isdatarequest) {
-//    // Cache throttling with workload ID.
     Pair <Cacheable, Boolean> returnPair = new Pair<Cacheable, Boolean>();
     returnPair.setSecond(false);
+
+    if (customId == 140) {
+      returnPair.setFirst(null);
+      returnPair.setSecond(true);
+      return returnPair;
+    }
 
     CachedBlock cb = map.get(cacheKey);
     if(cb == null) {

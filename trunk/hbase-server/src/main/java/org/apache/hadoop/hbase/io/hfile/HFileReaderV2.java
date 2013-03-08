@@ -313,40 +313,40 @@ public class HFileReaderV2 extends AbstractHFileReader {
           lockEntry = offsetLock.getLockEntry(dataBlockOffset);
         }
 
-        if (customId != 140) {
-          // Check cache for block. If found return.
-          if (cacheConf.isBlockCacheEnabled()) {
-            // Try and get the block from the block cache. If the useLock variable is true then this
-            // is the second time through the loop and it should not be counted as a block cache miss.
-            LruBlockCache cache = (LruBlockCache) cacheConf.getBlockCache();
 
-            // TODO(bharath): Proof that this cache is indeed the LruBlockCache
-            //if (cacheConf.getBlockCache() instanceof LruBlockCache) {
-            //LOG.info("YESSSS RIGHT CACHE");
-            //}
+        // Check cache for block. If found return.
+        if (cacheConf.isBlockCacheEnabled()) {
+          // Try and get the block from the block cache. If the useLock variable is true then this
+          // is the second time through the loop and it should not be counted as a block cache miss.
+          LruBlockCache cache = (LruBlockCache) cacheConf.getBlockCache();
+
+          // TODO(bharath): Proof that this cache is indeed the LruBlockCache
+          //if (cacheConf.getBlockCache() instanceof LruBlockCache) {
+          //LOG.info("YESSSS RIGHT CACHE");
+          //}
 
 
-            Pair<Cacheable, Boolean> returnPair = cache.getBlock(cacheKey,
-                cacheBlock, useLock, true, customId, expectedBlockType == BlockType.DATA);
+          Pair<Cacheable, Boolean> returnPair = cache.getBlock(cacheKey,
+              cacheBlock, useLock, true, customId, expectedBlockType == BlockType.DATA);
 
-            HFileBlock cachedBlock = (HFileBlock) returnPair.getFirst();
-            wasBlocked = returnPair.getSecond();
+          HFileBlock cachedBlock = (HFileBlock) returnPair.getFirst();
+          wasBlocked = returnPair.getSecond();
 
-            if (cachedBlock != null) {
-              if (cachedBlock.getBlockType() == BlockType.DATA) {
-                HFile.dataBlockReadCnt.incrementAndGet();
-              }
+          if (cachedBlock != null) {
+            if (cachedBlock.getBlockType() == BlockType.DATA) {
+              HFile.dataBlockReadCnt.incrementAndGet();
+            }
 
-              validateBlockType(cachedBlock, expectedBlockType);
+            validateBlockType(cachedBlock, expectedBlockType);
 
-              // Validate encoding type for encoded blocks. We include encoding
-              // type in the cache key, and we expect it to match on a cache hit.
-              if (cachedBlock.getBlockType() == BlockType.ENCODED_DATA
-                  && cachedBlock.getDataBlockEncoding() != dataBlockEncoder.getEncodingInCache()) {
-                throw new IOException("Cached block under key " + cacheKey + " "
-                    + "has wrong encoding: " + cachedBlock.getDataBlockEncoding() + " (expected: "
-                    + dataBlockEncoder.getEncodingInCache() + ")");
-              }
+            // Validate encoding type for encoded blocks. We include encoding
+            // type in the cache key, and we expect it to match on a cache hit.
+            if (cachedBlock.getBlockType() == BlockType.ENCODED_DATA
+                && cachedBlock.getDataBlockEncoding() != dataBlockEncoder.getEncodingInCache()) {
+              throw new IOException("Cached block under key " + cacheKey + " "
+                  + "has wrong encoding: " + cachedBlock.getDataBlockEncoding() + " (expected: "
+                  + dataBlockEncoder.getEncodingInCache() + ")");
+            }
 
 //            if (cachedBlock.getBlockType() == BlockType.DATA) {
 //              if (idHitCounts.containsKey(customId)) {
@@ -362,15 +362,14 @@ public class HFileReaderV2 extends AbstractHFileReader {
 //              }
 //            }
 
-              return cachedBlock;
-            }
-            // Carry on, please load.
+            return cachedBlock;
           }
-          if (!useLock) {
-            // check cache again with lock
-            useLock = true;
-            continue;
-          }
+          // Carry on, please load.
+        }
+        if (!useLock) {
+          // check cache again with lock
+          useLock = true;
+          continue;
         }
 
 
@@ -403,8 +402,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
         // MAINPLACE
         // Cache the block if necessary
         // If this request was blocked from cache access, don't try to place the block in cache.
-        if (customId != 70 && customId != 140 && cacheBlock
-            && cacheConf.shouldCacheBlockOnRead(hfileBlock.getBlockType().getCategory())) {
+        if (cacheBlock && cacheConf.shouldCacheBlockOnRead(hfileBlock.getBlockType().getCategory())) {
           LruBlockCache cache = (LruBlockCache) cacheConf.getBlockCache();
           cache.cacheBlock(cacheKey, hfileBlock, cacheConf.isInMemory(), customId);
         }
@@ -433,7 +431,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
 
   @Override
   public HFileBlock readBlock(long offset, long onDiskBlockSize, boolean cacheBlock,
-      boolean pread, boolean isCompaction, BlockType expectedBlockType) throws IOException {
+                              boolean pread, boolean isCompaction, BlockType expectedBlockType) throws IOException {
     return readBlock(offset, onDiskBlockSize, cacheBlock, pread, isCompaction, expectedBlockType, 0);
   }
 
