@@ -326,9 +326,6 @@ public class LruBlockCache implements BlockCache, HeapSize {
   // Clone of above allowing ID tagging of blocks
 
   public void cacheBlock(BlockCacheKey cacheKey, Cacheable buf, boolean inMemory, int customId) {
-    if (customId != 0 && customId != 80 && customId !=90 && customId != 40) {
-      return;
-    }
 
     CachedBlock cb = map.get(cacheKey);
     if(cb != null) {

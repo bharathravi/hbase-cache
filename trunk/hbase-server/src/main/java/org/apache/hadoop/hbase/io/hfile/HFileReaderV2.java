@@ -403,8 +403,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
         // MAINPLACE
         // Cache the block if necessary
         // If this request was blocked from cache access, don't try to place the block in cache.
-        if (customId != 70 && customId != 140 && cacheBlock
-            && cacheConf.shouldCacheBlockOnRead(hfileBlock.getBlockType().getCategory())) {
+        if (cacheBlock && cacheConf.shouldCacheBlockOnRead(hfileBlock.getBlockType().getCategory())) {
           LruBlockCache cache = (LruBlockCache) cacheConf.getBlockCache();
           cache.cacheBlock(cacheKey, hfileBlock, cacheConf.isInMemory(), customId);
         }
