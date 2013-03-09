@@ -1002,13 +1002,34 @@ public class LruBlockCache implements BlockCache, HeapSize {
           thresholdMap.put(workload, thresholdMap.get(workload) - 1);
           LOG.info("FOr DEC thresh: " + workload + " " + (thresholdMap.get(workload) - 1));
         } else {
-          float threshold = 100 * cacheReusePercentage.get(workload);
-          thresholdMap.put(workload, threshold);
+          float cacheFillPercentage = (float) getCurrentSize()/(float) getMaxSize();
+          float myOccupancy = occupancyMap.get(workload);
+
+          // Take the smaller of the cache fill percentage or the occupancy
+          // Why? Say cacheFill << Occupancy (cache has only 2 blocks and both are this workload).
+          // We wouldn't want to throttle then. Now similarly say occupancy << cacheFill (Cache is full, but the workload only
+          // occupies 2 blocks). Then also we wouldn't want to throttle.
+          float fudge = 2;
+          float factor = fudge*myOccupancy < cacheFillPercentage ? fudge*myOccupancy : cacheFillPercentage;
+
+          float threshold = 100 * cacheReusePercentage.get(workload)/factor;
+
+          if (threshold < 50) {
+            threshold = threshold/2;
+          }
+          if (threshold > 50) {
+            threshold = threshold * 2;
+          }
+          LOG.info("FOr " + workload +
+              " cachefill: " + cacheFillPercentage + " cacheReuse: " + cacheReusePercentage.get(workload)
+          + " occupancy: " + occupancyMap.get(workload));
+
 
           if (threshold > 95) {
             // Optimistically bump up good workloads
             threshold = 101;
           }
+          thresholdMap.put(workload, threshold);
 
           LOG.info("FOr Calc new thresh for ID: " + workload + " " + threshold);
           //thresholdMap.put(workload, new Float(100.0));
@@ -1021,7 +1042,7 @@ public class LruBlockCache implements BlockCache, HeapSize {
   }
 
   /**
-   * Get counter statistics for this cache.
+   * Get counter statistics for thische.
    *
    * <p>Includes: total accesses, hits, misses, evicted blocks, and runs
    * of the eviction processes.
