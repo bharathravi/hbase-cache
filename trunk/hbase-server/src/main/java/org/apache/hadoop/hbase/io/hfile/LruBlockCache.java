@@ -338,7 +338,7 @@ public class LruBlockCache implements BlockCache, HeapSize {
     }
 
     if (customId == 150) {
-      threshold = 10;
+      threshold = 0;
     }
 
     int x = rng.nextInt(100);
@@ -1009,25 +1009,30 @@ public class LruBlockCache implements BlockCache, HeapSize {
           // Why? Say cacheFill << Occupancy (cache has only 2 blocks and both are this workload).
           // We wouldn't want to throttle then. Now similarly say occupancy << cacheFill (Cache is full, but the workload only
           // occupies 2 blocks). Then also we wouldn't want to throttle.
-          float fudge = 2;
-          float factor = fudge*myOccupancy < cacheFillPercentage ? fudge*myOccupancy : cacheFillPercentage;
+          float factor = myOccupancy < cacheFillPercentage ? myOccupancy : cacheFillPercentage;
 
           float threshold = 100 * cacheReusePercentage.get(workload)/factor;
 
-          if (threshold < 50) {
-            threshold = threshold/2;
-          }
-          if (threshold > 50) {
-            threshold = threshold * 2;
-          }
+          // This exaggerates the effect of threshold: If aworkload has threshold below 50,
+          // it decreases it even further, and if it is above 50 it raises it further.
+          // The peanlty/reward is higher , upon higher differences from 50.
+
           LOG.info("FOr " + workload +
               " cachefill: " + cacheFillPercentage + " cacheReuse: " + cacheReusePercentage.get(workload)
-          + " occupancy: " + occupancyMap.get(workload));
+          + " occupancy: " + occupancyMap.get(workload) + " initthresh:" + threshold);
+
+          float diff = (threshold - 50)/25;
+          threshold = threshold + threshold * diff;
+
 
 
           if (threshold > 95) {
             // Optimistically bump up good workloads
             threshold = 101;
+          }
+
+          if (threshold < 0) {
+            threshold = 5;
           }
           thresholdMap.put(workload, threshold);
 
