@@ -364,7 +364,7 @@ public class LruBlockCache implements BlockCache, HeapSize {
     elements.incrementAndGet();
 
     if(newSize > acceptableSize() && !evictionInProgress) {
-        runEviction();
+      runEviction();
     }
 
 
@@ -929,7 +929,11 @@ public class LruBlockCache implements BlockCache, HeapSize {
   private void calculateReuse() {
     for (int id : cachePlacementCount.keySet()) {
       float placement = cachePlacementCount.get(id).floatValue();
-      float accesses = cacheUseCount.get(id).floatValue();
+
+      float accesses = 0;
+      if (cacheUseCount.containsKey(id)) {
+        accesses = cacheUseCount.get(id).floatValue();
+      }
 
       float ratio = accesses/placement;
       LOG.info("FOr cache Reuse: " + id + " is " + accesses + "/" + placement + "=" + ratio);
@@ -994,24 +998,18 @@ public class LruBlockCache implements BlockCache, HeapSize {
   private void calculateThresholds() {
     for (int workload : cacheReusePercentage.keySet()) {
       if (!thresholdMap.containsKey(workload)) {
-        thresholdMap.put(workload, 101f);
-        LOG.info("FOr workload: " + workload + " set MAX threshold " + 101);
+        thresholdMap.put(workload, 99f);
+        LOG.info("FOr workload: " + workload + " set MAX threshold " + 99);
       } else {
         if (thresholdMap.get(workload) > 100) {
           // If a workload has reached 103, start reducing it.
-          thresholdMap.put(workload, thresholdMap.get(workload) - 1);
           LOG.info("FOr DEC thresh: " + workload + " " + (thresholdMap.get(workload) - 1));
+          thresholdMap.put(workload, thresholdMap.get(workload) - 1);
         } else {
           float cacheFillPercentage = (float) getCurrentSize()/(float) getMaxSize();
           float myOccupancy = occupancyMap.get(workload);
 
-          // Take the smaller of the cache fill percentage or the occupancy
-          // Why? Say cacheFill << Occupancy (cache has only 2 blocks and both are this workload).
-          // We wouldn't want to throttle then. Now similarly say occupancy << cacheFill (Cache is full, but the workload only
-          // occupies 2 blocks). Then also we wouldn't want to throttle.
-          float factor = myOccupancy < cacheFillPercentage ? myOccupancy : cacheFillPercentage;
-
-          float threshold = 100 * cacheReusePercentage.get(workload)/factor;
+          float threshold = 100 * cacheReusePercentage.get(workload);
 
           // This exaggerates the effect of threshold: If aworkload has threshold below 50,
           // it decreases it even further, and if it is above 50 it raises it further.
@@ -1019,16 +1017,17 @@ public class LruBlockCache implements BlockCache, HeapSize {
 
           LOG.info("FOr " + workload +
               " cachefill: " + cacheFillPercentage + " cacheReuse: " + cacheReusePercentage.get(workload)
-          + " occupancy: " + occupancyMap.get(workload) + " initthresh:" + threshold);
+              + " occupancy: " + occupancyMap.get(workload) + " initthresh:" + threshold);
 
-          float diff = (threshold - 50)/25;
-          threshold = threshold + threshold * diff;
-
-
-
-          if (threshold > 95) {
-            // Optimistically bump up good workloads
-            threshold = 101;
+          if (cacheFillPercentage < 0.3) {
+            // If cache is not filled yet, let it run longer.
+            threshold = 99;
+          } else if (myOccupancy < 0.1) {
+              // If this is not occupying more than 10% of the cache, leave it alone.
+              threshold = 99;
+          } else {
+            float diff = (threshold - 50)/25;
+            threshold = threshold + threshold * diff;
           }
 
           if (threshold < 0) {
