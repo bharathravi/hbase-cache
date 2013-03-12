@@ -1,0 +1,56 @@
+This is BibTeX, Version 0.99c (TeX Live 2009/Debian)
+The top-level auxiliary file: draft2.aux
+The style file: plain.bst
+Illegal, another \bibstyle command---line 53 of file draft2.aux
+ : \bibstyle
+ :          {ieeetr}
+I'm skipping whatever remains of this command
+Database file #1: draft2.bib
+Warning--entry type for "HBase:2013:Online" isn't style-file defined
+--line 115 of file draft2.bib
+Warning--entry type for "HDFS:2013:Online" isn't style-file defined
+--line 123 of file draft2.bib
+Warning--to sort, need author or key in HBase:2013:Online
+Warning--to sort, need author or key in HDFS:2013:Online
+You've used 12 entries,
+            2118 wiz_defined-function locations,
+            587 strings with 7066 characters,
+and the built_in function-call counts, 5469 in all, are:
+= -- 547
+> -- 296
+< -- 7
++ -- 120
+- -- 106
+* -- 418
+:= -- 847
+add.period$ -- 38
+call.type$ -- 12
+change.case$ -- 89
+chr.to.int$ -- 0
+cite$ -- 14
+duplicate$ -- 204
+empty$ -- 390
+format.name$ -- 106
+if$ -- 1182
+int.to.chr$ -- 0
+int.to.str$ -- 12
+missing$ -- 10
+newline$ -- 59
+num.names$ -- 20
+pop$ -- 98
+preamble$ -- 1
+purify$ -- 77
+quote$ -- 0
+skip$ -- 165
+stack$ -- 0
+substring$ -- 320
+swap$ -- 72
+text.length$ -- 7
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 48
+warning$ -- 2
+while$ -- 46
+width$ -- 14
+write$ -- 142
+(There was 1 error message)

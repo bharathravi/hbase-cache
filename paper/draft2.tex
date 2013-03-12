@@ -1,0 +1,270 @@
+\documentclass[twocolumn]{article}
+\usepackage{multicol}
+\usepackage[margin=1in]{geometry}
+\usepackage{subfig}
+\usepackage{caption}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{listings}
+\usepackage[margin=1in]{geometry}
+\usepackage{url}
+\usepackage{graphicx}
+\usepackage{eqparbox}
+\usepackage{natbib}
+\renewcommand{\algorithmiccomment}[1]{\eqparbox{COMMENT}{\# #1}}
+\bibliographystyle{plain}
+
+\begin{document}
+
+\begin{multicols}{2}
+\title{\textbf{Resolving cache interference in distributed storage due to mixed workloads}}
+\author{
+    Bharath Ravi, Hrishikesh Amur, Mukil Kesavan, Karsten Schwan\\
+    \normalsize Georgia Institute of Technology
+}
+\maketitle
+\end{multicols}
+\begin{abstract}
+Distributed storage systems employ main memory caches to improve performance by some orders of magnitude over disk access. These large scale distributed stores simultaneously face multiple workoads, each with drastically different characteristics. Interference between these competing workloads causes inefficient or sub-optimal usage of the main memory cache, causing degraded performance. We focus on read performance and analyse the extent of such interference in common workload patterns. We develop an adaptive cache management solution to mitigate these effects.
+\end{abstract}
+
+\section{Introduction}
+Distributed key-value stores have become a popular way to store and serve vast amounts of data scalably. These systems are expected to store many terabytes of data and serve millions of clients simultaneously, while providing low access latencies.
+
+In achieveing this, serving requests out of main memory rather than from disk can greatly reduce access latencies by several orders of magnitude ~\cite{Ousterhout:2011:CR:1965724.1965751}. However, main memory is not always an abundant resource. Prior work ~\cite{Zhu:2012:SCU:2342763.2342766} reports that DRAM can account for as much as 37\% of operational costs. Efficient use of memory is therefore critical to good performance. Even with enough main memory available to use as a cache, interference due to competing workloads can cause poor performance. 
+
+For example, consider a workload that accesses only popular data with a high probablity. This might expect to find almost all of its data in the cache memory of the appropriate datanode. However, other workloads also access the cache at the same time. A `uniformly random' workload that accesses a large portion of the dataset might pollute the cache by reading data items that it will never access again, thus reducing the cache space available for popular items. Worse, a workload interested in a different set of popular items might access the same datanode. In this case, if available memory is not large enough to store both sets of popular items, both workloads suffer.
+
+We focus on read performance of key-value stores and analyzing some scenarios of workload interference for some common classes of workloads, and develop an adaptive cache allocation solution to mitigate these effects.  
+
+\begin{figure*}[ht!]\footnotesize
+  \centering
+  \mbox {
+  \subfloat[Popular with Uniform]{\includegraphics[scale=0.25]{ZU-throughput.png}}\qquad
+  \subfloat[Popular with Scan]{\includegraphics[scale=0.25]{ZS-throughput.png}}
+  }
+  \caption{Interference between workloads}
+  \label{fig:interference}
+\end{figure*}
+
+We motivate our study using some practical examples of storage sytems facing mixed workloads. 
+\begin{enumerate}
+\item \textbf{Scenario 1:} A big-data analysis application might run a number of MapReduce queries against a large dataset. For example a log-analysis system collects metrics and monitoring information from a large distributed system and analyzes these offline. Some of these jobs may access small portions of the dataset repeatedly: for example, jobs that are required to diagnose an ongoing performance issue. We call the stream of requests that access such popular items repeatedly a ``Popular" workload.  At the same time, a number of long-running jobs might be running across large portions across the dataset, to analyse performance over a long period of time. The requests made by these would be uniformly spread across all records in the dataset. We call the stream of such requests a ``Scan" workloads. 
+
+Figure ~\ref{fig:interference}(a) illustrates the effects of running a Popular workload together with a Scan. Compared to the baseline throughput, the Popular workload suffers by as much as 60\%, while the uniform workload remains relatively unaffected.
+
+\item \textbf{Scenario 2:} A cloud service provider using a common storage layer might see a variety of client workloads. Some clients may have a small dataset size that it is easily cacheable, while others may query large segments of their dataset. Further, priority clients may pay more for better performance from the back-end store. In cases deploying independent isolated stores for all clients is not scalable, a single backend store would need to ensure good performance for most of their clients. 
+
+Consider a priority client running against a small workload at the same time as other clients that access large portions of their dataset randomly. The former is similar to a ``Popular" workload that may be small enough to cache within main memory and serve repeatedly. The latter are ``background" workloads that together uniformly access items across a large dataset. We call this stream of requests a Uniformly Random load, or simly a ``Uniform" workload. 
+
+We find that Popular workloads suffer in HBase when run together with a uniform load. Figure ~\ref{fig:interference}(b) highlights that performance degradation can be as much as 50\% compared to the baseline throughput.
+
+\end{enumerate}
+
+
+The rest of this Paper is organized as follows. Section ~\ref{sec:system} explains our system model and assumptions.  Section ~\ref{sec:experiment} presents an analysis of workload interference in different scenarios, and Section ~\ref{sec:solution} presents a brief overview of our proposed solution. % and ~\ref{sec:evaluation} evaluates the effectiveness of this. Finally, ~\ref{sec:relatedwork} discusses other approaches and related work.
+
+\section{Related Work}
+\label{sec:related-work}
+A number of works ~\citep{Ghosh:2011:SSS:2066302.2066917} ~\cite{Mesnier:2011:DSS:1945023.1945030} analyze interference due to mixed workloads. Most of these, however, do so from the perspective of a single machine's hardware cache. Ghosh et. al ~\cite{Ghosh:2011:SSS:2066302.2066917} study L2 cache contention due to multiple applications and develop an optimal  process-to-core mapping. Mesnier et. al ~\cite{Mesnier:2011:DSS:1945023.1945030} strike a similar chord as us, by differentating between different classes of I/O requests and using this to perform more informed cache management. However, they do so from the perspective of a single machine's Operating System cache. Further, their classes of workloads are static and unlikely to change, unlike a key-value store where a workload might change in characteristics.
+
+On caching at the application layer, especially in large distributed systems, various systems add an additional caching layer between an underlying store and the front-end application. However, all work we found viewed client requests as a single workload, and do not consider cases where workloads could be distinguished into different classes based on theri characteristics.
+Memcached ~\cite{Fitzpatrick:2004:DCM:1012889.1012894} adds an in-memory store
+
+Fan et. al ~\cite{Fan:2011:SCB:2038916.2038939} discusses using a small front-end cache can provide effective load balancing across many storage nodes. While they prove that using such a cache prevents adverse loads from developing on any single node, they do not consider performance degradation to to poor management or inefficient use of available memory on nodes, or analyze interference effects that could develop in either the front-end cache or the underlying store in workloads with mixed characteristics.
+
+\textbf{TODO:} The following are yet to be reviewed in detail:
+\begin{enumerate}
+\item Hotspot Prediction and Cache: Dynamically predicting and caching hotspots in a stream processor ~\cite{5403810}.
+\item HashCache: A scalable network cache. This paper seems more aimed at network caches like CDNs, rather than a distributed storage system. ~\cite{Badam:2009:HCS:1558977.1558986}
+\item Workload analysis of large scale keyvalue stores ~\cite{Atikoglu:2012:WAL:2318857.2254766}
+\end{enumerate}
+
+\section{System model}
+\label{sec:system}
+We use the popular HBase key-value store ~\cite {HBase:2013:Online} as a base model for our analysis. We choose HBase for anumber of reasons. Firstly, HBase is a popular commercial key-value store used in many data intensive applications \textbf{TODO: quote examples.} Secondly, the main memory record cache within HBase is characteristic of a large number of other distributed stores: it stores blocks of records and uses a modified LRU algorithm to maintain the cache. \textbf{[TODO: quote other key value stores that use simple key value: Cassandra, Redis, Voldemort }
+
+HBase is modelled on Google's ``BigTable" ~\cite{Chang:2006:BDS:1267308.1267323} and is a scalable, structured ``Column store". It uses the Hadoop Distributed File System (HDFS) ~\cite{HDFS:2013:Online} as an underlying filesystem which provides a reliable, available raw filesystem. 
+
+
+\textbf{TODO: Detailed review of other components of HBase architecture}
+
+\section{Analysis of Intereference effects}
+\label{sec:experiment}
+
+\subsection{Experimental Setup}
+\textbf{Testbed: }Our testbed consists of 8 physical machines, each with 2GB of main memory and a 10GB disk. Each node is connected to all others through a network with a 1Gbps interconnect between any pair. Each machine runs a HDFS datanode and a HBase regionserver.
+We configure HDFS to use a replication factor of 1. HBase reads records from HDFS in ``blocks" of size 64KB each. Each block therefore contains approximately 20 records. Each HBase node is provided with a cache space of 395MB, which is sufficient to cache approximately 6300 blocks per node. The HDFS and HBase servers are configured to use a 100 handler threads per node, which is much higher than the maximum number of client request threads.
+
+To run the load generator, we use a single machine with identical configuration as above. We ensure that this client node is not a bottleneck in terms of CPU, memory, network or disk resources. We use three classes
+
+\textbf{Methodology:}  We use the YCSB benchmark ~\cite{Cooper:2010:BCS:1807128.1807152} to populate and query the HBase dataset. The dataset consists of 22 million records of size 3.1 KB each. This translates to around 65GB of disk space, spread across the 8 disks. Against this dataset, generate workloads that simulate the Popular, Uniform and Scan characteristics. We use three different configurations:
+
+\begin{enumerate}
+\item \textbf{Popular Read:}  
+To simulate clients that are interested only in a popular portion of the data, we use a Popular workload that was restricted to 60 thousand records to ensure that a significant portion of the popular data fit in memory. The Popular read selects its dataset of 60 thousand records from the parent dataset by uniformly random selection. Within this subset, it queries certain records more often than other. 
+
+%%Since the each of the 60k records is selected randomly, each record falls in a different block with high probability. With a parent dataset of size 22 million records, and a zipfian dataset of size 60K records, the probability of each record being in a different block is 
+
+\item \textbf{Uniform random read:} To simulate requests that access the dataset uniformly, we used a YCSB Uniform workload that randomly access any of the 22 million records with equal probability.
+
+\item \textbf{Uniform scan:} To simulate requests that access a number of records sequentially, we use the Uniform scan workload. Each scan request selects a segment of the overall dataset to access sequentially. The segments to scan are selected uniformly randomly over the dataset.
+
+Table ~\ref{tab:workloads} details the configurations of each workload. We configure the number of operations for the workloads so that they finish at approximately the same time when run together. For the Popular workload's data set, we choose a subset of 60 thousand records. This is calculated to be the approximate number of records that can fit into the aggregate memory of all 8 nodes. Since the Popular workload selects each record uniformly randomly across the 22 million dataset, with high probability each of the 60 thousand records falls in a different block. These 60 thousand blocks of 64KB each occupy a total of 3.67GB, or 470MB per node: slightly higher than the available 395MB main memory cache per node.
+
+Each operation of the Popular and Uniform workloads is exactly 1 record read operation.
+For the Scan workload, each operation performs a number of sequential reads. This number (the scan length) is chose unformly randomly to be between 1 and the size of the dataset. For this reason, the number of operations for the scan workload is much lower than the other two.
+
+To isolate effects due to the application managed main memory cache, we flush the operating system's page cache every 10 milli-seconds on all nodes. We clear all caches by stopping and restarting HBase between consecutive runs of workloads. During each workload, we track the disk and memory consumption and HBase cache hit-rate on each node.
+
+\begin{table*}[ht!]\footnotesize
+\centering
+\begin{tabular}{ | c | c | c | c |   }
+  \hline
+\textbf{Workload} & \textbf{Distribution} & \textbf{Dataset size} & \textbf{Number of } \\
+&  & \textbf{(No. of records)} &  \textbf{operations} \\
+\hline
+Popular(P) & Zipfian  & 60K & 400K   \\
+Uniform(U) & Uniform random & 22M & 300K \\
+Scan (S) & Uniform random & 22M & 18K  \\ 
+\hline
+\end{tabular}
+\caption{Workload configurations. M denotes 1 million units, and K denotes 1 thousand units.}  
+\label{tab:workloads}
+\end{table*}
+
+
+\end{enumerate}
+
+In order to track cache stastics for individual worklods, we instrument HBase to allow ``workload tagging". Each YCSB workload is assigned a unique ID that is used to track the number of blocks it accesses, cache hits and misses, and its cache footprint. Our experiments show that this adds virtually no overhead to the existing HBase implementation.
+
+Next, we analyse how these workloads interact in each case. In following analyses, we denote the Popular workloda by the letter `P', the uniform workload by `U' and the scan workload by `S'. `PU' thus refers to a pair of one Popular and one Uniform workload run together.
+
+\subsection{Baseline}
+
+\begin{figure}[h!]\footnotesize
+  \centering
+  \mbox {
+  \includegraphics[scale=0.35]{baseline-throughput.png}
+  }
+  \caption{Baseline Throughputs}
+  \label{fig:baseline}
+\end{figure}
+
+
+\begin{table*}[ht!]\footnotesize
+\centering
+\begin{tabular}{ | c | c | c | c |   }
+  \hline
+\textbf{Workload} & \textbf{Average Disk } & \textbf{Cumulative} & \textbf{Avg. throughput} \\
+            & \textbf{utilization (\%)} & \textbf{cache hit rate (\%)} & \textbf{(ops/sec)}\\
+\hline
+Popular (P)  & 55.45 & 82.5 & 1387.8 \\
+Uniform (U)  & 62.50 & 8.3 & 286.20 \\
+Scan (S) & 28.55 & 8.3 & 16.45 \\ 
+\hline
+\end{tabular}
+\caption{Baseline workload statistics}  
+\label{tab:baseline-workload}
+\end{table*}
+
+We first run each workload independently to measure our setup's baseline performance. 
+In each run, we run the relevant workload twice: once to pre-populate the cache, and a second time to measure throughput. Each workload is run until throughput is saturated. Although our results are based on the assumption that the cache is clean/empty at the beginning, we also ran the same experiments by pre-populating the cache with the Popular workload. We found virtually no difference in results.
+
+Figure ~\ref{fig:baseline} shows the base throughputs of the three workloads while Table ~\ref{tab:baseline-workload} shows the number of operations per workload, the average disk utilization across all 8 nodes and the cumulative cache hit rate calculated across all 8 nodes. The cumulative cache hit rate is the total number of cache hits over the total number of cache accesses across all nodes, over the entire duration of the workload.
+
+We observe that the throughput for Popular workload is an order of magnitude greater than the Uniform load, which in turn is greater than the Scan load. 
+
+\subsection{Interference effects}
+
+\begin{table*}[ht!]\footnotesize
+\centering
+\begin{tabular}{ | c | c | c | c |   }
+  \hline
+\textbf{Workload} & \textbf{Average Disk } & \textbf{Cumulative} & \textbf{Avg. throughput} \\
+            & \textbf{utilization (\%)} & \textbf{cache hit rate (\%)} & \textbf{(ops/sec)}\\
+\hline
+Popular (P)  & 68.85 & 64.9 & 537 \\
+Uniform (U)  & 68.85 & 10.1 & 231 \\
+\hline
+\end{tabular}
+\label{tab:ZU-interference}
+\caption{Popular and Uniform}
+
+
+
+\begin{tabular}{ | c | c | c | c |   }
+  \hline
+\textbf{Workload} & \textbf{Average Disk } & \textbf{Cumulative} & \textbf{Avg. throughput} \\
+            & \textbf{utilization (\%)} & \textbf{cache hit rate (\%)} & \textbf{(ops/sec)}\\
+\hline
+Popular (P)  & 63.59 & 67.47 & 443.64 \\
+Scan (S) & 63.59 & -- & 12.46 \\ 
+\hline
+\end{tabular}
+\caption{Popular and Scan}  
+\label{tab:ZS-interference}
+\end{table*}
+
+\textbf{Scenario 1: Popular vs Uniform.} 
+We run a Popular and a Uniform workload simulatenously to determine interference between the two. We initially warm-up the cache by running a Popular workload, to populate the cache with ``popular" items followed by the two simultaneous workloads. Figure ~\ref{fig:interference}(a) highlights this. Table ~\ref{tab:ZU-interference} contains details on the workload. We observe that disk utilization is 63.5\%, indicating that the disk is not yet a bottleneck. However, we note that the cache hit rate for the Popular workload is 17.6\% lower than the baseline. The degradation in throughput is around 61\%.
+
+The Uniform workload sees a 19\% drop in throughput and a 2\% increase in cache hit rate \textbf{TODO: Explain this increase: this is likely due to `positive' interference with the Zipfian, that retains blocks in cache or longer}. 
+\\
+\\
+\textbf{Scenario 2: Popular vs Scan.}
+Similar performance degradation occurs when running a Popular workload with a Scan. Figure ~\ref{fig:interference}(b) and Table ~\ref{tab:ZS-interference} describe this effect. We see a 68\% drop in throughput of the Popular workload, along with a 15\% drop in cache hit rate. The scan workload sees a 24.2\% drop in throughput.
+
+\section{Preventing interference through cache throttling}
+\label{sec:solution}
+
+
+\begin{figure*}[ht!]\footnotesize
+  \centering
+  \mbox {
+  \subfloat[Threshold = 35]{\includegraphics[scale=0.25]{ZU-thresh35-throughput.png}}\qquad
+  \subfloat[Threshold = 75]{\includegraphics[scale=0.25]{ZU-thresh75-throughput.png}}\qquad
+  \subfloat[Threshold = 95]{\includegraphics[scale=0.25]{ZU-thresh95-throughput.png}}
+  }
+  \caption{Effects of throttling Uniform in Popular vs. Uniform}
+  \label{fig:threshold-throughput}
+\end{figure*}
+
+
+\begin{figure*}[ht!]\footnotesize
+  \centering
+  \mbox {
+  \subfloat[Throuhgputs vs Throttle values]{\includegraphics[scale=0.25]{ZU-threshold.png}}\qquad
+  \subfloat[Cache hit-rates vs Throttle values]{\includegraphics[scale=0.25]{ZU-threshold-cache.png}}
+  }
+  \caption{Effects of throttling Uniform in Popular vs. Uniform}
+  \label{fig:threshold-bars}
+\end{figure*}
+
+The above experiments reveal that Popular throughputs are severely degraded when run together with Uniform or Scan workloads, while the latter remain relatively unharmed. Further, we note that the cache hit rates are much 
+Explain reasoning behind ID throttling. To conclusively prove that the source of performance bottleneck is the cache, we first completely prevent one of the workloads from accessing the cache. We assign each workload a unique ID to distinguish between requests from each. We first consider the Popular vs. Uniform case, and prevent the Uniform workload from accessing the cache completely. 
+
+We perform cache throttling by preventing certain client requests from accessing the cache, thus reserving cache space and bandwidth for performant workloads. By tagging workloads with a uniqeue identifier, we distinguish between workloads that have a higher probability of a cache hit, and reserve cache for such requests by throttling workloads with lower cache hit rates. Throttling is performed by preventing a certain percentage of the throttled workloads requests from accessing the cache. We call this percentage the `throttle value'. 
+
+Intuitively, setting too low a throttle value severly limits the throttled workload's throughput, while setting it too high would cause interference with unthrottled workloads due to competing cache accesses. This is clear from Figure ~\ref{fig:threshold-throughput}. With a low threshold of 35, only 35\% of the Uniform loads requests are allowed to access the cache. With this,we see a high throughput of close to 1800 ops/sec for the Popular workload. However, as long as the Popular workload runs, the Uniform workload suffers severely, with an average throughput of around 20 ops/sec. On the other hand, with a high throughput of 95, while the Uniform workload is remains unaffected, the maximum throughput of the Popular load is limited to around 800 ops/sec.
+
+
+Figures ~\ref{fig:threshold-bars} show the effects of various values on the throughput and cache hit-rate. We see that lowering throttle value (stricter throttling) increases both throughput and cache hit-rate for the Popular load, while decreasing it for the Uniform load. Throttling thus give us a tool to trade-off between a ``cache-friendly" load and a ``cache-unfriendly" load, allowing us to allocate more of the cache to the workload that will make better use of the cache.
+
+
+\section{Next steps:}
+\begin{enumerate}
+\item Now that we have throttling, a knob, develop an adaptive technique to set the right throttle value.
+ This will be done by ``sampling" a workload for a limited time and looking at its cache hit-rates and footprint size. Work loads with low cache hit rates but high footprints will throttled down more aggressively. 
+ 
+ \item Cache throttling has no effect on interference with Scan. Look into the bottleneck for this scenario.
+ 
+ \item We see no interference between two Popular, two Uniform or two Scan workloads. However, two Popular workloads, each accessing a different set of items will interfere. Present results on this. The solution here is to isolate the two popular sets by moving them to different sets of region servers.
+\end{enumerate}
+
+
+
+\bibliographystyle{ieeetr}
+\footnotesize
+\bibliography{draft2}
+\end{document}

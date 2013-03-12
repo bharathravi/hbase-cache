@@ -1,0 +1,78 @@
+\begin{thebibliography}{10}
+
+\bibitem{HDFS:2013:Online}
+The hadoop distributed filesystem, February 2013.
+
+\bibitem{HBase:2013:Online}
+Hbase: a distributed, scalable, big data store, February 2013.
+
+\bibitem{Badam:2009:HCS:1558977.1558986}
+Anirudh Badam, KyoungSoo Park, Vivek~S. Pai, and Larry~L. Peterson.
+\newblock Hashcache: cache storage for the next billion.
+\newblock In {\em Proceedings of the 6th USENIX symposium on Networked systems
+  design and implementation}, NSDI'09, pages 123--136, Berkeley, CA, USA, 2009.
+  USENIX Association.
+
+\bibitem{Chang:2006:BDS:1267308.1267323}
+Fay Chang, Jeffrey Dean, Sanjay Ghemawat, Wilson~C. Hsieh, Deborah~A. Wallach,
+  Mike Burrows, Tushar Chandra, Andrew Fikes, and Robert~E. Gruber.
+\newblock Bigtable: a distributed storage system for structured data.
+\newblock In {\em Proceedings of the 7th USENIX Symposium on Operating Systems
+  Design and Implementation - Volume 7}, OSDI '06, pages 15--15, Berkeley, CA,
+  USA, 2006. USENIX Association.
+
+\bibitem{Cooper:2010:BCS:1807128.1807152}
+Brian~F. Cooper, Adam Silberstein, Erwin Tam, Raghu Ramakrishnan, and Russell
+  Sears.
+\newblock Benchmarking cloud serving systems with ycsb.
+\newblock In {\em Proceedings of the 1st ACM symposium on Cloud computing},
+  SoCC '10, pages 143--154, New York, NY, USA, 2010. ACM.
+
+\bibitem{Fan:2011:SCB:2038916.2038939}
+Bin Fan, Hyeontaek Lim, David~G. Andersen, and Michael Kaminsky.
+\newblock Small cache, big effect: provable load balancing for randomly
+  partitioned cluster services.
+\newblock In {\em Proceedings of the 2nd ACM Symposium on Cloud Computing},
+  SOCC '11, pages 23:1--23:12, New York, NY, USA, 2011. ACM.
+
+\bibitem{Fitzpatrick:2004:DCM:1012889.1012894}
+Brad Fitzpatrick.
+\newblock Distributed caching with memcached.
+\newblock {\em Linux J.}, 2004(124):5--, August 2004.
+
+\bibitem{Ghosh:2011:SSS:2066302.2066917}
+Mrinmoy Ghosh, Ripal Nathuji, Min Lee, Karsten Schwan, and Hsien-Hsin~S. Lee.
+\newblock Symbiotic scheduling for shared caches in multi-core systems using
+  memory footprint signature.
+\newblock In {\em Proceedings of the 2011 International Conference on Parallel
+  Processing}, ICPP '11, pages 11--20, Washington, DC, USA, 2011. IEEE Computer
+  Society.
+
+\bibitem{Mesnier:2011:DSS:1945023.1945030}
+Michael~P. Mesnier and Jason~B. Akers.
+\newblock Differentiated storage services.
+\newblock {\em SIGOPS Oper. Syst. Rev.}, 45(1):45--53, February 2011.
+
+\bibitem{Ousterhout:2011:CR:1965724.1965751}
+John Ousterhout, Parag Agrawal, David Erickson, Christos Kozyrakis, Jacob
+  Leverich, David Mazi\`{e}res, Subhasish Mitra, Aravind Narayanan, Diego
+  Ongaro, Guru Parulkar, Mendel Rosenblum, Stephen~M. Rumble, Eric Stratmann,
+  and Ryan Stutsman.
+\newblock The case for ramcloud.
+\newblock {\em Commun. ACM}, 54(7):121--130, July 2011.
+
+\bibitem{5403810}
+Chentao Wu, Xubin He, Shenggang Wan, Qiang Cao, and Changsheng Xie.
+\newblock Hotspot prediction and cache in distributed stream-processing storage
+  systems.
+\newblock In {\em Performance Computing and Communications Conference (IPCCC),
+  2009 IEEE 28th International}, pages 331 --340, dec. 2009.
+
+\bibitem{Zhu:2012:SCU:2342763.2342766}
+Timothy Zhu, Anshul Gandhi, Mor Harchol-Balter, and Michael~A. Kozuch.
+\newblock Saving cash by using less cache.
+\newblock In {\em Proceedings of the 4th USENIX conference on Hot Topics in
+  Cloud Ccomputing}, HotCloud'12, pages 3--3, Berkeley, CA, USA, 2012. USENIX
+  Association.
+
+\end{thebibliography}
