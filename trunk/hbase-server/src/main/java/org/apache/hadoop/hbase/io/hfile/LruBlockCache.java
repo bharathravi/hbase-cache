@@ -122,6 +122,11 @@ public class LruBlockCache implements BlockCache, HeapSize {
   private static HashMap<Integer, AtomicLong> periodichitsCount = new HashMap<Integer, AtomicLong>();
   private static HashMap<Integer, AtomicLong> periodicmissCount = new HashMap<Integer, AtomicLong>();
 
+  private static HashMap<Integer, AtomicLong> cachePlacementCount = new HashMap<Integer, AtomicLong>();
+  private static HashMap<Integer, AtomicLong> cacheUseCount = new HashMap<Integer, AtomicLong>();
+  private static HashMap<Integer, Float> cacheReusePercentage = new HashMap<Integer, Float>();
+
+
 
   private static Random rng = new Random();
 
@@ -326,17 +331,46 @@ public class LruBlockCache implements BlockCache, HeapSize {
   // Clone of above allowing ID tagging of blocks
 
   public void cacheBlock(BlockCacheKey cacheKey, Cacheable buf, boolean inMemory, int customId) {
+    // Throttling writes
+    float threshold = 100;
+    if (thresholdMap.containsKey(customId)) {
+      threshold = thresholdMap.get(customId);
+    }
+
+    if (customId == 150) {
+      threshold = 0;
+    }
+
+    int x = rng.nextInt(100);
+    if (x >= threshold) {
+      return;
+    }
 
     CachedBlock cb = map.get(cacheKey);
     if(cb != null) {
-      return;
-      //throw new RuntimeException("Cached an already cached block");
+      throw new RuntimeException("Cached an already cached block");
     }
     cb = new CachedBlock(cacheKey, buf, count.incrementAndGet(), inMemory);
     cb.setCustomId(customId);
+    cb.setUsed(false);
+
     long newSize = updateSizeMetrics(cb, false);
+
+//    if (customId == 70 || customId == 140) {
+//      return;
+//    }
+
     map.put(cacheKey, cb);
     elements.incrementAndGet();
+
+    if(newSize > acceptableSize() && !evictionInProgress) {
+      runEviction();
+    }
+
+
+// YESPROB   if (customId == 70 || customId == 140) {
+//               return;
+//     }
 
     if (occupancy.containsKey(customId)) {
       occupancy.get(customId).incrementAndGet();
@@ -344,10 +378,17 @@ public class LruBlockCache implements BlockCache, HeapSize {
       occupancy.put(customId, new AtomicLong(1));
     }
 
-    if(newSize > acceptableSize() && !evictionInProgress) {
-      LOG.info("FOr RUN EVOCTION FROM CACHE BLOCK");
-      runEviction();
+    if (cachePlacementCount.containsKey(customId)) {
+      cachePlacementCount.get(customId).incrementAndGet();
+    } else {
+      cachePlacementCount.put(customId, new AtomicLong(1));
     }
+
+
+// YESPROB   if (customId == 70 || customId == 140) {
+//              return;
+//    }
+
   }
 
   /**
@@ -412,24 +453,10 @@ public class LruBlockCache implements BlockCache, HeapSize {
    */
   public Pair<Cacheable, Boolean> getBlock(BlockCacheKey cacheKey, boolean caching, boolean repeat,
                                            boolean updateaccess, int customId, boolean isdatarequest) {
-//    // Cache throttling with workload ID.
     Pair <Cacheable, Boolean> returnPair = new Pair<Cacheable, Boolean>();
-//    float threshold = 100;
-//    if (thresholdMap.containsKey(customId) && isdatarequest) {
-//      threshold = thresholdMap.get(customId);
-//    }
-//    int x = rng.nextInt(100);
-//    if (x >= threshold) {
-//      //LOG.info("Blocked " + customId + " " + threshold + " " + x);
-//      returnPair.setFirst(null);
-//      returnPair.setSecond(true);
-//      return returnPair;
-//    }
-    //LOG.info("NotBlocked " + customId + " " + threshold + " " + x);
-
-
     returnPair.setSecond(false);
-    if (customId != 0 && customId != 80 && customId !=90 && customId != 40) {
+
+    if (customId == 140) {
       returnPair.setFirst(null);
       returnPair.setSecond(true);
       return returnPair;
@@ -475,6 +502,19 @@ public class LruBlockCache implements BlockCache, HeapSize {
         periodichitsCount.get(customId).incrementAndGet();
       } else {
         periodichitsCount.put(customId, new AtomicLong(1));
+      }
+    }
+
+    // TODO: Lot of changes to do here.
+    // 1. Should this be tracked for all blocks, or only blocks that *I* placed into cache?
+    // 2. How often do I reset "used" to false? I.e, if it hasn't been used in a while, it's unused right?
+    // How does above tie in with LRU eviction? Should we bump down priority if unused?
+    if (!cb.isUsed() && cb.getCustomId() == customId) {
+      cb.setUsed(true);
+      if (cacheUseCount.containsKey(customId)) {
+        cacheUseCount.get(customId).incrementAndGet();
+      } else {
+        cacheUseCount.put(customId, new AtomicLong(1));
       }
     }
 
@@ -860,7 +900,57 @@ public class LruBlockCache implements BlockCache, HeapSize {
         "evicted=" + stats.getEvictedCount() + ", " +
         "evictedPerRun=" + stats.evictedPerEviction());
 
+    calculateHitRatios();
+    calculateOccupancy();
+    calculateReuse();
+    calculateThresholds();
 
+    LOG.info("FOr total accesses: "  + accesses);
+    LOG.info("FOr max accesses: "  + maxaccesses);
+    if (elements.floatValue() > 0) {
+      LOG.info("FOr avg accesses: "  + (float)accesses/elements.floatValue());
+    }
+    accesses = 0;
+    maxaccesses = 0;
+
+    LOG.info("FOr Unique blocs:" + HFileReaderV2.uniqueBlocks.size());
+    for (int id : HFileReaderV2.uniqueBlockCounts.keySet()) {
+      LOG.info("FOr Uniq blocks ID: " + id + " " + HFileReaderV2.uniqueBlockCounts.get(id).size());
+    }
+    HFileReaderV2.idMissCounts.clear();
+    HFileReaderV2.idHitCounts.clear();
+    periodichitsCount.clear();
+    periodicmissCount.clear();
+//  HFileReaderV2.readCounts.clear();
+//    HFileReaderV2.blockCounts.clear();
+//    HFileReaderV2.blockCacheCounts.clear();
+  }
+
+  private void calculateReuse() {
+    for (int id : cachePlacementCount.keySet()) {
+      float placement = cachePlacementCount.get(id).floatValue();
+
+      float accesses = 0;
+      if (cacheUseCount.containsKey(id)) {
+        accesses = cacheUseCount.get(id).floatValue();
+      }
+
+      float ratio = accesses/placement;
+      LOG.info("FOr cache Reuse: " + id + " is " + accesses + "/" + placement + "=" + ratio);
+      cacheReusePercentage.put(id, ratio);
+    }
+  }
+
+  private void calculateOccupancy() {
+    LOG.info("FOr Occupancy metrics");
+    for (int id : occupancy.keySet()) {
+      float idoccupancy = occupancy.get(id).floatValue()/elements.floatValue();
+      occupancyMap.put(id, idoccupancy);
+      LOG.info("FOr IDOccupancy: " + id + " is: " + idoccupancy);
+    }
+  }
+
+  private void calculateHitRatios() {
     Set<Integer> keys = new TreeSet<Integer>();
     keys.addAll(hitsCount.keySet());
     keys.addAll(missCount.keySet());
@@ -903,84 +993,60 @@ public class LruBlockCache implements BlockCache, HeapSize {
             + " misses: " + misses + " ratio: " + ratio);
       }
     }
-//    LOG.info("BEGINDHUP");
-//    for(String each : HFileReaderV2.blockCounts.keySet()) {
-//      LOG.info("FOr HfileBlock: " + each + " counts are : " + HFileReaderV2.blockCounts.get(each));
-//    }
-//
-//    for(String each : HFileReaderV2.blockCacheCounts.keySet()) {
-//      LOG.info("FOr HfileCacheBlock: " + each + " counts are : " + HFileReaderV2.blockCacheCounts.get(each));
-//    }
-//    LOG.info("ENDDHUP");
+  }
 
-    LOG.info("FOr Occupancy metrics");
-    for (int id : occupancy.keySet()) {
-      float idoccupancy = occupancy.get(id).floatValue()/elements.floatValue();
-      occupancyMap.put(id, idoccupancy);
-      LOG.info("FOr IDOccupancy: " + id + " is: " + idoccupancy);
+  private void calculateThresholds() {
+    for (int workload : cacheReusePercentage.keySet()) {
+      if (!thresholdMap.containsKey(workload)) {
+        thresholdMap.put(workload, 99f);
+        LOG.info("FOr workload: " + workload + " set MAX threshold " + 99);
+      } else {
+        if (thresholdMap.get(workload) > 100) {
+          // If a workload has reached 103, start reducing it.
+          LOG.info("FOr DEC thresh: " + workload + " " + (thresholdMap.get(workload) - 1));
+          thresholdMap.put(workload, thresholdMap.get(workload) - 1);
+        } else {
+          float cacheFillPercentage = (float) getCurrentSize()/(float) getMaxSize();
+          float myOccupancy = occupancyMap.get(workload);
+
+          float threshold = 100 * cacheReusePercentage.get(workload);
+
+          // This exaggerates the effect of threshold: If aworkload has threshold below 50,
+          // it decreases it even further, and if it is above 50 it raises it further.
+          // The peanlty/reward is higher , upon higher differences from 50.
+
+          LOG.info("FOr " + workload +
+              " cachefill: " + cacheFillPercentage + " cacheReuse: " + cacheReusePercentage.get(workload)
+              + " occupancy: " + occupancyMap.get(workload) + " initthresh:" + threshold);
+
+          if (cacheFillPercentage < 0.3) {
+            // If cache is not filled yet, let it run longer.
+            threshold = 99;
+          } else if (myOccupancy < 0.1) {
+              // If this is not occupying more than 10% of the cache, leave it alone.
+              threshold = 99;
+          } else {
+            float diff = (threshold - 50)/25;
+            threshold = threshold + threshold * diff;
+          }
+
+          if (threshold < 0) {
+            threshold = 5;
+          }
+          thresholdMap.put(workload, threshold);
+
+          LOG.info("FOr Calc new thresh for ID: " + workload + " " + threshold);
+          //thresholdMap.put(workload, new Float(100.0));
+
+        }
+      }
     }
-
-//    for (int workload : occupancyMap.keySet()) {
-//      if (hitRatioMap.containsKey(workload)) {
-//        if (!thresholdMap.containsKey(workload)) {
-//          thresholdMap.put(workload, 101f);
-//          LOG.info("FOr workload: " + workload + " set MAX threshold " + 101);
-//        } else {
-//          if (thresholdMap.get(workload) > 100) {
-//            // If a workload has reached 103, give it some warm up time.
-//            thresholdMap.put(workload, thresholdMap.get(workload) - 1);
-//            LOG.info("FOr DEC thresh: " + workload + " " + (thresholdMap.get(workload) - 1));
-//          } else {
-////            LOG.info("F " + workload);
-//            float hitRatio = hitRatioMap.get(workload);
-//            float occupancy = occupancyMap.get(workload);
-//            float threshold = 100;
-//
-//            threshold = 100 * (hitRatio/occupancy);
-//            thresholdMap.put(workload, threshold);
-//
-//
-//            if (threshold < 15) {
-//              threshold = 15;
-//            }
-//
-//            if (threshold > 95) {
-//              // Optimistaically bump up good workloads
-//              threshold = 103;
-//            }
-//
-//            LOG.info("FOr Calc new thresh: " + workload + " " + threshold);
-//            //thresholdMap.put(workload, new Float(100.0));
-//            thresholdMap.put(0, new Float(100.0));
-//            thresholdMap.put(267, new Float(100.0));
-//          }
-//        }
-//      }
-//    }
-
-    LOG.info("FOr total accesses: "  + accesses);
-    LOG.info("FOr max accesses: "  + maxaccesses);
-    if (elements.floatValue() > 0) {
-      LOG.info("FOr avg accesses: "  + (float)accesses/elements.floatValue());
-    }
-    accesses = 0;
-    maxaccesses = 0;
-
-    LOG.info("FOr Unique blocs:" + HFileReaderV2.uniqueBlocks.size());
-    for (int id : HFileReaderV2.uniqueBlockCounts.keySet()) {
-      LOG.info("FOr Uniq blocks ID: " + id + " " + HFileReaderV2.uniqueBlockCounts.get(id).size());
-    }
-    HFileReaderV2.idMissCounts.clear();
-    HFileReaderV2.idHitCounts.clear();
-    periodichitsCount.clear();
-    periodicmissCount.clear();
-//  HFileReaderV2.readCounts.clear();
-//    HFileReaderV2.blockCounts.clear();
-//    HFileReaderV2.blockCacheCounts.clear();
+    thresholdMap.put(0, new Float(100.0));
+    thresholdMap.put(267, new Float(100.0));
   }
 
   /**
-   * Get counter statistics for this cache.
+   * Get counter statistics for thische.
    *
    * <p>Includes: total accesses, hits, misses, evicted blocks, and runs
    * of the eviction processes.
